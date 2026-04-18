@@ -1,23 +1,24 @@
 {
   "name": "gitlab-rebase",
   "module": "index.ts",
-  "type": "module",
-  "private": true,
-  "bin": {
-    "gitlab-rebase": "./index.ts"
-  },
-  "scripts": {
-    "start": "bun run index.ts",
-    "test": "bun test"
-  },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/node": "^25.6.0"
+    "@types/node": "^25.6.0",
+    "@types/yargs": "^17.0.35"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
+  "bin": {
+    "gitlab-rebase": "./index.ts"
+  },
+  "private": true,
+  "scripts": {
+    "start": "bun run index.ts",
+    "test": "bun test"
+  },
+  "type": "module",
   "dependencies": {
-    "commander": "^14.0.3"
+    "yargs": "^18.0.0"
   }
 }

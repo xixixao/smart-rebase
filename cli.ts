@@ -1,23 +1,23 @@
-import { Command } from "commander";
+import yargs from "yargs";
+import { hideBin } from "yargs/helpers";
 
-export type Options = {
-  verbose: boolean;
-};
-
-export function createCli(): Command {
-  const program = new Command()
-    .name("gitlab-rebase")
-    .description(
-      "Placeholder: automates rebasing of GitLab merge requests onto a target branch.",
-    )
-    .version("0.1.0", "-V, --version", "Output the version number")
-    .option("-v, --verbose", "Enable verbose output", false)
-    .action((opts: Options) => {
-      if (opts.verbose) {
-        console.log("Verbose mode enabled");
-      }
-      console.log("Hello from gitlab-rebase!");
-    });
-
-  return program;
+export function createCli(argv = hideBin(process.argv)) {
+  return yargs(argv)
+    .scriptName("gitlab-rebase")
+    .usage("$0 [options]")
+    .version("0.1.0")
+    .alias("version", "V")
+    .help()
+    .alias("help", "h")
+    .option("verbose", {
+      alias: "v",
+      type: "boolean",
+      description: "Enable verbose output",
+      default: false,
+    })
+    .strict()
+    .wrap(null)
+    .exitProcess(false);
 }
+
+export type Argv = Awaited<ReturnType<ReturnType<typeof createCli>["parseAsync"]>>;

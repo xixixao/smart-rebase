@@ -1,25 +1,38 @@
 import { test, expect } from "bun:test";
-import { createCli, type Argv } from "./cli";
 
-async function parse(args: string[]): Promise<Argv> {
-  return createCli(args).parseAsync();
+async function run(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const proc = Bun.spawn(["bun", "run", "index.ts", ...args], {
+    cwd: import.meta.dir,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { stdout, stderr, exitCode };
 }
 
 test("verbose defaults to false", async () => {
-  const argv = await parse([]);
-  expect(argv.verbose).toBe(false);
+  const { stdout, exitCode } = await run([]);
+  expect(exitCode).toBe(0);
+  expect(stdout).not.toContain("Verbose mode enabled");
 });
 
 test("--verbose flag is recognised", async () => {
-  const argv = await parse(["--verbose"]);
-  expect(argv.verbose).toBe(true);
+  const { stdout, exitCode } = await run(["--verbose"]);
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain("Verbose mode enabled");
 });
 
 test("-v alias works", async () => {
-  const argv = await parse(["-v"]);
-  expect(argv.verbose).toBe(true);
+  const { stdout, exitCode } = await run(["-v"]);
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain("Verbose mode enabled");
 });
 
-test("unknown flag throws in strict mode", async () => {
-  await expect(parse(["--unknown"])).rejects.toThrow();
+test("unknown flag exits with non-zero code", async () => {
+  const { exitCode } = await run(["--unknown"]);
+  expect(exitCode).not.toBe(0);
 });

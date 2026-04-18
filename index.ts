@@ -1,1 +1,3 @@
-console.log("Hello via Bun!");
+import { createCli } from "./cli";
+
+createCli().parse();

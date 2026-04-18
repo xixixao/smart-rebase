@@ -6,4 +6,5 @@ if (argv.verbose) {
   console.log("Verbose mode enabled");
 }
 
-console.log("Hello from gitlab-rebase!");
+const headSha = await Bun.$`git rev-parse --short HEAD`.text();
+console.log(headSha.trim());

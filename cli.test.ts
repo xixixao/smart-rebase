@@ -1,4 +1,6 @@
 import { test, expect } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
 
 async function run(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const proc = Bun.spawn(["bun", "run", "index.ts", ...args], {
@@ -35,4 +37,24 @@ test("-v alias works", async () => {
 test("unknown flag exits with non-zero code", async () => {
   const { exitCode } = await run(["--unknown"]);
   expect(exitCode).not.toBe(0);
+});
+
+test("prints HEAD short sha", async () => {
+  const repoPath = mkdtempSync("/tmp/gitlab-rebase-test-");
+  const GIT_DATE = "2020-01-01T00:00:00+00:00";
+
+  await Bun.$`git init`.cwd(repoPath).quiet();
+  await Bun.$`git config user.email "test@example.com"`.cwd(repoPath).quiet();
+  await Bun.$`git config user.name "Test User"`.cwd(repoPath).quiet();
+  await Bun.$`git config commit.gpgsign false`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "Initial commit"`
+    .cwd(repoPath)
+    .env({ ...process.env, GIT_AUTHOR_DATE: GIT_DATE, GIT_COMMITTER_DATE: GIT_DATE })
+    .quiet();
+
+  const expectedSha = (await Bun.$`git rev-parse --short HEAD`.cwd(repoPath).text()).trim();
+
+  const output = await Bun.$`bun run ${join(import.meta.dir, "index.ts")}`.cwd(repoPath).text();
+
+  expect(output.trim()).toBe(expectedSha);
 });

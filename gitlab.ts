@@ -1,14 +1,22 @@
-export interface MergeRequest {
-  iid: number;
-  title: string;
-  merge_commit_sha: string | null;
-}
+import { type } from "arktype";
 
-export interface MRCommit {
-  id: string;
-  short_id: string;
-  title: string;
-}
+const MergeRequest = type({
+  iid: "number",
+  title: "string",
+  merge_commit_sha: "string | null",
+});
+
+const MRCommit = type({
+  id: "string",
+  short_id: "string",
+  title: "string",
+});
+
+const MergeRequestArray = MergeRequest.array();
+const MRCommitArray = MRCommit.array();
+
+export type MergeRequest = typeof MergeRequest.infer;
+export type MRCommit = typeof MRCommit.infer;
 
 export interface MRWithCommits {
   mr: MergeRequest;
@@ -32,7 +40,9 @@ export async function fetchRecentMergedMRs(opts: {
   if (!mrsRes.ok) {
     throw new Error(`GitLab API error ${mrsRes.status}: ${await mrsRes.text()}`);
   }
-  const mrs: MergeRequest[] = await mrsRes.json();
+  const mrsData = await mrsRes.json();
+  const mrs = MergeRequestArray(mrsData);
+  if (mrs instanceof type.errors) throw new Error(`Invalid MR list: ${mrs.summary}`);
 
   return Promise.all(
     mrs.map(async (mr) => {
@@ -45,7 +55,10 @@ export async function fetchRecentMergedMRs(opts: {
           `GitLab API error ${commitsRes.status} for MR !${mr.iid}: ${await commitsRes.text()}`
         );
       }
-      const commits: MRCommit[] = await commitsRes.json();
+      const commitsData = await commitsRes.json();
+      const commits = MRCommitArray(commitsData);
+      if (commits instanceof type.errors)
+        throw new Error(`Invalid commits for MR !${mr.iid}: ${commits.summary}`);
       return { mr, commits };
     })
   );

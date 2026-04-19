@@ -19,6 +19,7 @@
   },
   "type": "module",
   "dependencies": {
+    "arktype": "^2.2.0",
     "yargs": "^18.0.0"
   }
 }

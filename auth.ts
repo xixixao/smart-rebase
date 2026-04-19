@@ -77,11 +77,12 @@ function createReadlinePrompt(): (question: string) => Promise<string> {
 
 async function defaultOpenBrowser(url: string): Promise<void> {
   const cmd =
-    process.platform === "darwin"
+    process.env.BROWSER ??
+    (process.platform === "darwin"
       ? "open"
       : process.platform === "win32"
         ? "start"
-        : "xdg-open";
+        : "xdg-open");
   try {
     await Bun.$`${cmd} ${url}`.quiet();
   } catch {

@@ -1,6 +1,9 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
+
+const GITLAB_TOKEN_URL =
+  "https://gitlab.com/-/user_settings/personal_access_tokens?name=gitlab-rebase&scopes=api";
 
 async function run(
   args: string[],
@@ -49,6 +52,15 @@ async function run(
     proc.exited,
   ]);
   return { stdout, stderr, exitCode };
+}
+
+async function makeBrowserScript(): Promise<{ browserScript: string; browserLog: string }> {
+  const tmpDir = mkdtempSync("/tmp/gitlab-rebase-test-");
+  const browserScript = join(tmpDir, "browser.sh");
+  const browserLog = join(tmpDir, "browser-url.txt");
+  await Bun.write(browserScript, `#!/bin/sh\necho "$1" > "${browserLog}"\n`);
+  await Bun.$`chmod +x ${browserScript}`.quiet();
+  return { browserScript, browserLog };
 }
 
 test("verbose defaults to false", async () => {
@@ -103,7 +115,62 @@ test("prints HEAD short sha", async () => {
   expect(output.trim()).toBe(expectedSha);
 });
 
-test("prompts for GITLAB_USERNAME and GITLAB_TOKEN when not set", async () => {
+test("runs without auth prompts when env vars are set", async () => {
+  const { stderr, exitCode } = await run([]);
+  expect(exitCode).toBe(0);
+  expect(stderr).not.toContain("GITLAB_USERNAME");
+  expect(stderr).not.toContain("GITLAB_TOKEN");
+});
+
+test("prompts for username when GITLAB_USERNAME is not set", async () => {
+  const { stderr, exitCode } = await run([], {
+    env: { GITLAB_USERNAME: undefined },
+    stdin: "myuser\n",
+  });
+  expect(exitCode).toBe(0);
+  expect(stderr).toContain("GITLAB_USERNAME");
+});
+
+test("prompts for token when GITLAB_TOKEN is not set", async () => {
+  const { stderr, exitCode } = await run([], {
+    env: { GITLAB_TOKEN: undefined },
+    stdin: "mytoken\n",
+  });
+  expect(exitCode).toBe(0);
+  expect(stderr).toContain("GITLAB_TOKEN");
+  expect(stderr).toContain("gitlab.com");
+});
+
+test("token prompt shows GitLab URL with api scope", async () => {
+  const { stderr } = await run([], {
+    env: { GITLAB_TOKEN: undefined },
+    stdin: "mytoken\n",
+  });
+  expect(stderr).toContain(GITLAB_TOKEN_URL);
+});
+
+test("opens browser when user presses Enter on token prompt", async () => {
+  const { browserScript, browserLog } = await makeBrowserScript();
+  const { exitCode } = await run([], {
+    env: { GITLAB_TOKEN: undefined, BROWSER: browserScript },
+    stdin: "\nmyfinaltoken\n",
+  });
+  expect(exitCode).toBe(0);
+  const openedUrl = await Bun.file(browserLog).text();
+  expect(openedUrl.trim()).toBe(GITLAB_TOKEN_URL);
+});
+
+test("does not open browser when token is pasted directly", async () => {
+  const { browserScript, browserLog } = await makeBrowserScript();
+  const { exitCode } = await run([], {
+    env: { GITLAB_TOKEN: undefined, BROWSER: browserScript },
+    stdin: "pastedtoken\n",
+  });
+  expect(exitCode).toBe(0);
+  expect(existsSync(browserLog)).toBe(false);
+});
+
+test("prompts for both credentials when neither env var is set", async () => {
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_USERNAME: undefined, GITLAB_TOKEN: undefined },
     stdin: "myuser\nmytoken\n",
@@ -111,4 +178,12 @@ test("prompts for GITLAB_USERNAME and GITLAB_TOKEN when not set", async () => {
   expect(exitCode).toBe(0);
   expect(stderr).toContain("GITLAB_USERNAME");
   expect(stderr).toContain("GITLAB_TOKEN");
+});
+
+test("accepts credentials with surrounding whitespace", async () => {
+  const { exitCode } = await run([], {
+    env: { GITLAB_USERNAME: undefined, GITLAB_TOKEN: undefined },
+    stdin: "  myuser  \n  mytoken  \n",
+  });
+  expect(exitCode).toBe(0);
 });

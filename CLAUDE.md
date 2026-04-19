@@ -23,6 +23,8 @@ Default to using Bun instead of Node.js.
 
 Use `bun test` to run tests.
 
+Strictly no unit/implementation tests. All tests must exercise the command like a user would — spawn the CLI as a subprocess and assert on its stdout, stderr, exit code, and side effects.
+
 ```ts#index.test.ts
 import { test, expect } from "bun:test";
 

@@ -1,9 +1,36 @@
-import { test, expect } from "bun:test";
+import { test, expect, afterAll, beforeEach } from "bun:test";
 import { existsSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 
 const GITLAB_TOKEN_URL =
   "https://gitlab.com/-/user_settings/personal_access_tokens?name=gitlab-rebase&scopes=api";
+
+// Mutable state driven by individual tests; reset before each test.
+let mockMRs: object[] = [];
+const mockCommits = new Map<number, object[]>();
+
+const mockGitLab = Bun.serve({
+  port: 0,
+  fetch(req: Request) {
+    const pathname = new URL(req.url).pathname;
+    const commitsMatch = pathname.match(/\/merge_requests\/(\d+)\/commits$/);
+    if (commitsMatch) {
+      return Response.json(mockCommits.get(parseInt(commitsMatch[1])) ?? []);
+    }
+    if (pathname.match(/\/merge_requests$/)) {
+      return Response.json(mockMRs);
+    }
+    return new Response("Not Found", { status: 404 });
+  },
+});
+
+afterAll(() => mockGitLab.stop());
+beforeEach(() => {
+  mockMRs = [];
+  mockCommits.clear();
+});
+
+const GITLAB_URL = `http://localhost:${mockGitLab.port}`;
 
 async function run(
   args: string[],
@@ -22,6 +49,8 @@ async function run(
     ...processEnv,
     GITLAB_USERNAME: "testuser",
     GITLAB_TOKEN: "testtoken",
+    GITLAB_URL,
+    GITLAB_PROJECT: "testgroup/testrepo",
   };
 
   for (const [k, v] of Object.entries(opts.env ?? {})) {
@@ -84,35 +113,6 @@ test("-v alias works", async () => {
 test("unknown flag exits with non-zero code", async () => {
   const { exitCode } = await run(["--unknown"]);
   expect(exitCode).not.toBe(0);
-});
-
-test("prints HEAD short sha", async () => {
-  const repoPath = mkdtempSync("/tmp/gitlab-rebase-test-");
-  const GIT_DATE = "2020-01-01T00:00:00+00:00";
-
-  await Bun.$`git init`.cwd(repoPath).quiet();
-  await Bun.$`git config user.email "test@example.com"`.cwd(repoPath).quiet();
-  await Bun.$`git config user.name "Test User"`.cwd(repoPath).quiet();
-  await Bun.$`git config commit.gpgsign false`.cwd(repoPath).quiet();
-  await Bun.$`git commit --allow-empty -m "Initial commit"`
-    .cwd(repoPath)
-    .env({ ...process.env, GIT_AUTHOR_DATE: GIT_DATE, GIT_COMMITTER_DATE: GIT_DATE })
-    .quiet();
-
-  const expectedSha = (await Bun.$`git rev-parse --short HEAD`.cwd(repoPath).text()).trim();
-
-  const output = await Bun.$`bun run ${join(import.meta.dir, "index.ts")}`
-    .cwd(repoPath)
-    .env({
-      ...process.env,
-      GIT_AUTHOR_DATE: GIT_DATE,
-      GIT_COMMITTER_DATE: GIT_DATE,
-      GITLAB_USERNAME: "testuser",
-      GITLAB_TOKEN: "testtoken",
-    })
-    .text();
-
-  expect(output.trim()).toBe(expectedSha);
 });
 
 test("runs without auth prompts when env vars are set", async () => {
@@ -186,4 +186,53 @@ test("accepts credentials with surrounding whitespace", async () => {
     stdin: "  myuser  \n  mytoken  \n",
   });
   expect(exitCode).toBe(0);
+});
+
+test("prints merged MRs with their commits", async () => {
+  mockMRs = [
+    { iid: 1, title: "Add feature", merge_commit_sha: "abc123" },
+    { iid: 2, title: "Fix bug", merge_commit_sha: "def456" },
+  ];
+  mockCommits.set(1, [{ id: "sha1full", short_id: "sha1ful", title: "Implement feature" }]);
+  mockCommits.set(2, [
+    { id: "sha2full", short_id: "sha2ful", title: "Fix the bug" },
+    { id: "sha3full", short_id: "sha3ful", title: "Add test for fix" },
+  ]);
+
+  const { stdout, exitCode } = await run([]);
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain("!1 Add feature");
+  expect(stdout).toContain("sha1ful Implement feature");
+  expect(stdout).toContain("!2 Fix bug");
+  expect(stdout).toContain("sha2ful Fix the bug");
+  expect(stdout).toContain("sha3ful Add test for fix");
+});
+
+test("outputs nothing when there are no merged MRs", async () => {
+  const { stdout, exitCode } = await run([]);
+  expect(exitCode).toBe(0);
+  expect(stdout.trim()).toBe("");
+});
+
+test("fetches commits for all MRs", async () => {
+  mockMRs = [
+    { iid: 10, title: "MR ten", merge_commit_sha: null },
+    { iid: 20, title: "MR twenty", merge_commit_sha: null },
+    { iid: 30, title: "MR thirty", merge_commit_sha: null },
+  ];
+  mockCommits.set(10, [{ id: "c10full", short_id: "c10", title: "Commit 10" }]);
+  mockCommits.set(20, [{ id: "c20full", short_id: "c20", title: "Commit 20" }]);
+  mockCommits.set(30, [{ id: "c30full", short_id: "c30", title: "Commit 30" }]);
+
+  const { stdout, exitCode } = await run([]);
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain("Commit 10");
+  expect(stdout).toContain("Commit 20");
+  expect(stdout).toContain("Commit 30");
+});
+
+test("exits with error when project cannot be determined", async () => {
+  const { stderr, exitCode } = await run([], { env: { GITLAB_PROJECT: undefined } });
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("GITLAB_PROJECT");
 });

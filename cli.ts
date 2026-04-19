@@ -15,6 +15,11 @@ export function createCli(argv = hideBin(process.argv)) {
       description: "Enable verbose output",
       default: false,
     })
+    .option("sha", {
+      type: "boolean",
+      description: "Print the HEAD short SHA",
+      default: false,
+    })
     .strict()
     .wrap(null)
     .exitProcess(false);

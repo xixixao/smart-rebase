@@ -19,6 +19,10 @@ Default to using Bun instead of Node.js.
 - Prefer `Bun.file` over `node:fs`'s readFile/writeFile
 - Bun.$`ls` instead of execa.
 
+## Validation
+
+Use `arktype` to validate all external data (API responses, user input). Don't use zod.
+
 ## Testing
 
 Use `bun test` to run tests.

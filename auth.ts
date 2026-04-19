@@ -8,84 +8,41 @@ export interface GitLabAuth {
   token: string;
 }
 
-export interface AuthOptions {
-  env?: Record<string, string | undefined>;
-  prompt?: (question: string) => Promise<string>;
-  openBrowser?: (url: string) => Promise<void>;
-  write?: (message: string) => void;
+const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: false });
+const stdinLines = rl[Symbol.asyncIterator]();
+
+async function prompt(question: string): Promise<string> {
+  process.stderr.write(question);
+  const result = await stdinLines.next();
+  return result.done ? "" : result.value.trim();
 }
 
-export async function getAuth(options: AuthOptions = {}): Promise<GitLabAuth> {
-  const env = options.env ?? (process.env as Record<string, string | undefined>);
-  const write = options.write ?? ((msg: string) => process.stderr.write(msg));
-  const prompt = options.prompt ?? createReadlinePrompt();
-  const openBrowser = options.openBrowser ?? defaultOpenBrowser;
-
-  const username =
-    env["GITLAB_USERNAME"] ?? (await promptForUsername({ write, prompt }));
-  const token =
-    env["GITLAB_TOKEN"] ?? (await promptForToken({ write, prompt, openBrowser }));
-
-  return { username, token };
-}
-
-async function promptForUsername(deps: {
-  write: (msg: string) => void;
-  prompt: (q: string) => Promise<string>;
-}): Promise<string> {
-  deps.write("GITLAB_USERNAME is not set.\n");
-  return (await deps.prompt("Enter your GitLab username: ")).trim();
-}
-
-async function promptForToken(deps: {
-  write: (msg: string) => void;
-  prompt: (q: string) => Promise<string>;
-  openBrowser: (url: string) => Promise<void>;
-}): Promise<string> {
-  deps.write("GITLAB_TOKEN is not set.\n");
-  deps.write(
-    `Create a personal access token with 'api' scope at:\n  ${GITLAB_TOKEN_URL}\n\n`
-  );
-
-  const input = await deps.prompt(
-    "Press Enter to open in your browser, or paste your token: "
-  );
-
-  if (input.trim() === "") {
-    await deps.openBrowser(GITLAB_TOKEN_URL);
-    return (await deps.prompt("Enter your GitLab API token: ")).trim();
-  }
-
-  return input.trim();
-}
-
-function createReadlinePrompt(): (question: string) => Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stderr,
-    terminal: false,
-  });
-
-  const iter = rl[Symbol.asyncIterator]();
-
-  return async (question: string): Promise<string> => {
-    process.stderr.write(question);
-    const result = await iter.next();
-    return result.done ? "" : result.value;
-  };
-}
-
-async function defaultOpenBrowser(url: string): Promise<void> {
+async function openBrowser(url: string): Promise<void> {
   const cmd =
     process.env.BROWSER ??
-    (process.platform === "darwin"
-      ? "open"
-      : process.platform === "win32"
-        ? "start"
-        : "xdg-open");
+    (process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open");
   try {
     await Bun.$`${cmd} ${url}`.quiet();
-  } catch {
-    // Ignore if browser can't be opened
+  } catch {}
+}
+
+export async function getAuth(): Promise<GitLabAuth> {
+  let username = process.env.GITLAB_USERNAME;
+  if (!username) {
+    process.stderr.write("GITLAB_USERNAME is not set.\n");
+    username = await prompt("Enter your GitLab username: ");
   }
+
+  let token = process.env.GITLAB_TOKEN;
+  if (!token) {
+    process.stderr.write("GITLAB_TOKEN is not set.\n");
+    process.stderr.write(`Create a personal access token with 'api' scope at:\n  ${GITLAB_TOKEN_URL}\n\n`);
+    token = await prompt("Press Enter to open in your browser, or paste your token: ");
+    if (token === "") {
+      await openBrowser(GITLAB_TOKEN_URL);
+      token = await prompt("Enter your GitLab API token: ");
+    }
+  }
+
+  return { username, token };
 }

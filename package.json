@@ -15,7 +15,8 @@
   "private": true,
   "scripts": {
     "start": "bun run index.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "test:coverage": "bun test --coverage"
   },
   "type": "module",
   "dependencies": {

@@ -1,6 +1,7 @@
 import { createCli } from "./cli";
 import { getAuth } from "./auth";
 import { fetchRecentMergedMRs } from "./gitlab";
+import { readCache, writeCache } from "./storage";
 
 const argv = await createCli().parseAsync();
 
@@ -18,11 +19,15 @@ const auth = await getAuth();
 const gitlabUrl = process.env.GITLAB_URL ?? "https://gitlab.com";
 const projectId = await getProjectId();
 
-const mrsWithCommits = await fetchRecentMergedMRs({
-  baseUrl: gitlabUrl,
-  projectId,
-  token: auth.token,
-});
+let mrsWithCommits = await readCache(gitlabUrl, projectId);
+if (mrsWithCommits === null) {
+  mrsWithCommits = await fetchRecentMergedMRs({
+    baseUrl: gitlabUrl,
+    projectId,
+    token: auth.token,
+  });
+  await writeCache(gitlabUrl, projectId, mrsWithCommits);
+}
 
 for (const { mr, commits } of mrsWithCommits) {
   console.log(`!${mr.iid} ${mr.title}`);

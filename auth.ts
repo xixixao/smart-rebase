@@ -1,4 +1,6 @@
 import { createInterface } from "node:readline";
+import { join, dirname } from "node:path";
+import { mkdir } from "node:fs/promises";
 
 export const GITLAB_TOKEN_URL =
   "https://gitlab.com/-/user_settings/personal_access_tokens?name=gitlab-rebase&scopes=api";
@@ -26,14 +28,57 @@ async function openBrowser(url: string): Promise<void> {
   } catch {}
 }
 
+function getSettingsPath(): string {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+  if (process.platform === "darwin") {
+    return join(home, "Library", "Application Support", "gitlab-rebase", "credentials.json");
+  } else if (process.platform === "win32") {
+    const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
+    return join(appData, "gitlab-rebase", "credentials.json");
+  } else {
+    const configHome = process.env.XDG_CONFIG_HOME ?? join(home, ".config");
+    return join(configHome, "gitlab-rebase", "credentials.json");
+  }
+}
+
+async function loadSettings(): Promise<Partial<GitLabAuth>> {
+  const file = Bun.file(getSettingsPath());
+  if (!(await file.exists())) return {};
+  try {
+    const data = await file.json();
+    return {
+      username: typeof data.username === "string" ? data.username : undefined,
+      token: typeof data.token === "string" ? data.token : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function saveSettings(auth: GitLabAuth): Promise<string | null> {
+  const settingsPath = getSettingsPath();
+  try {
+    await mkdir(dirname(settingsPath), { recursive: true });
+    await Bun.write(settingsPath, JSON.stringify(auth, null, 2));
+    return settingsPath;
+  } catch {
+    return null;
+  }
+}
+
 export async function getAuth(): Promise<GitLabAuth> {
-  let username = process.env.GITLAB_USERNAME;
+  const saved = await loadSettings();
+
+  let username = process.env.GITLAB_USERNAME ?? saved.username;
+  let token = process.env.GITLAB_TOKEN ?? saved.token;
+  let prompted = false;
+
   if (!username) {
     process.stderr.write("GITLAB_USERNAME is not set.\n");
     username = await prompt("Enter your GitLab username: ");
+    prompted = true;
   }
 
-  let token = process.env.GITLAB_TOKEN;
   if (!token) {
     process.stderr.write("GITLAB_TOKEN is not set.\n");
     process.stderr.write(`Create a personal access token with 'api' scope at:\n  ${GITLAB_TOKEN_URL}\n\n`);
@@ -41,6 +86,14 @@ export async function getAuth(): Promise<GitLabAuth> {
     if (token === "") {
       await openBrowser(GITLAB_TOKEN_URL);
       token = await prompt("Enter your GitLab API token: ");
+    }
+    prompted = true;
+  }
+
+  if (prompted) {
+    const savedPath = await saveSettings({ username, token });
+    if (savedPath) {
+      process.stderr.write(`Credentials saved to ${savedPath}\n`);
     }
   }
 

@@ -64,7 +64,7 @@ async function run(
     GITLAB_URL,
     GITLAB_PROJECT: "testgroup/testrepo",
     XDG_CONFIG_HOME: testConfigDir,
-    GITLAB_CACHE_TTL_MS: "0",
+    GITLAB_CACHE_DIR: mkdtempSync("/tmp/gitlab-rebase-test-"),
   };
 
   for (const [k, v] of Object.entries(opts.env ?? {})) {
@@ -403,38 +403,34 @@ test("env vars take precedence over saved credentials", async () => {
 
 // --- cache tests ---
 
-test("uses disk cache on second run", async () => {
+test("merges cached older MRs with fresh ones", async () => {
   const tmpDir = mkdtempSync("/tmp/gitlab-rebase-cache-test-");
-  mockMRs = [{ iid: 1, title: "Original MR", merge_commit_sha: "abc" }];
-  mockCommits.set(1, [{ id: "sha1full", short_id: "sha1", title: "First" }]);
 
-  await run([], { env: { GITLAB_CACHE_DIR: tmpDir, GITLAB_CACHE_TTL_MS: undefined } });
+  mockMRs = [{ iid: 1, title: "Old MR", merge_commit_sha: "abc" }];
+  mockCommits.set(1, []);
+  await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
 
   mockMRs = [{ iid: 2, title: "New MR", merge_commit_sha: "def" }];
   mockCommits.set(2, []);
+  const { stdout, exitCode } = await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
 
-  const { stdout, exitCode } = await run([], {
-    env: { GITLAB_CACHE_DIR: tmpDir, GITLAB_CACHE_TTL_MS: undefined },
-  });
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("!1 Original MR");
-  expect(stdout).not.toContain("!2 New MR");
+  expect(stdout).toContain("!1 Old MR");
+  expect(stdout).toContain("!2 New MR");
 });
 
-test("bypasses expired cache when TTL is 0", async () => {
+test("fresh data replaces cached version of same MR", async () => {
   const tmpDir = mkdtempSync("/tmp/gitlab-rebase-cache-test-");
-  mockMRs = [{ iid: 1, title: "Original MR", merge_commit_sha: "abc" }];
+
+  mockMRs = [{ iid: 1, title: "Old title", merge_commit_sha: "abc" }];
   mockCommits.set(1, []);
+  await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
 
-  await run([], { env: { GITLAB_CACHE_DIR: tmpDir, GITLAB_CACHE_TTL_MS: undefined } });
+  mockMRs = [{ iid: 1, title: "Updated title", merge_commit_sha: "abc" }];
+  mockCommits.set(1, []);
+  const { stdout, exitCode } = await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
 
-  mockMRs = [{ iid: 2, title: "Fresh MR", merge_commit_sha: "def" }];
-  mockCommits.set(2, []);
-
-  const { stdout, exitCode } = await run([], {
-    env: { GITLAB_CACHE_DIR: tmpDir, GITLAB_CACHE_TTL_MS: "0" },
-  });
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("!2 Fresh MR");
-  expect(stdout).not.toContain("!1 Original MR");
+  expect(stdout).toContain("Updated title");
+  expect(stdout).not.toContain("Old title");
 });

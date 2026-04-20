@@ -3,8 +3,7 @@ import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { MRWithCommits } from "./gitlab";
 
-const CACHE_VERSION = 1;
-const DEFAULT_TTL_MS = 5 * 60 * 1000;
+const CACHE_VERSION = 2;
 
 const CachedCommit = type({
   id: "string",
@@ -25,7 +24,6 @@ const CachedEntry = type({
 
 const CacheFile = type({
   version: "number",
-  fetchedAt: "number",
   mrs: CachedEntry.array(),
 });
 
@@ -38,12 +36,6 @@ function cacheDir(): string {
 function cachePath(baseUrl: string, projectId: string): string {
   const key = `${baseUrl}:${projectId}`.replace(/[^a-zA-Z0-9.-]/g, "_");
   return join(cacheDir(), `${key}.json`);
-}
-
-function ttlMs(): number {
-  const env = process.env.GITLAB_CACHE_TTL_MS;
-  if (env !== undefined) return parseInt(env, 10);
-  return DEFAULT_TTL_MS;
 }
 
 export async function readCache(
@@ -63,7 +55,6 @@ export async function readCache(
   const data = CacheFile(raw);
   if (data instanceof type.errors) return null;
   if (data.version !== CACHE_VERSION) return null;
-  if (Date.now() - data.fetchedAt > ttlMs()) return null;
 
   return data.mrs;
 }
@@ -73,10 +64,9 @@ export async function writeCache(
   projectId: string,
   mrs: MRWithCommits[]
 ): Promise<void> {
-  const dir = cacheDir();
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(cacheDir(), { recursive: true });
   await Bun.write(
     cachePath(baseUrl, projectId),
-    JSON.stringify({ version: CACHE_VERSION, fetchedAt: Date.now(), mrs })
+    JSON.stringify({ version: CACHE_VERSION, mrs })
   );
 }

@@ -64,6 +64,7 @@ async function run(
     GITLAB_URL,
     GITLAB_PROJECT: "testgroup/testrepo",
     XDG_CONFIG_HOME: testConfigDir,
+    GITLAB_CACHE_DIR: mkdtempSync("/tmp/gitlab-rebase-test-"),
   };
 
   for (const [k, v] of Object.entries(opts.env ?? {})) {
@@ -398,4 +399,38 @@ test("env vars take precedence over saved credentials", async () => {
   expect(stderr).not.toContain("GITLAB_USERNAME is not set");
   expect(stderr).not.toContain("GITLAB_TOKEN is not set");
   expect(stderr).not.toContain("Credentials saved");
+});
+
+// --- cache tests ---
+
+test("merges cached older MRs with fresh ones", async () => {
+  const tmpDir = mkdtempSync("/tmp/gitlab-rebase-cache-test-");
+
+  mockMRs = [{ iid: 1, title: "Old MR", merge_commit_sha: "abc" }];
+  mockCommits.set(1, []);
+  await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
+
+  mockMRs = [{ iid: 2, title: "New MR", merge_commit_sha: "def" }];
+  mockCommits.set(2, []);
+  const { stdout, exitCode } = await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
+
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain("!1 Old MR");
+  expect(stdout).toContain("!2 New MR");
+});
+
+test("fresh data replaces cached version of same MR", async () => {
+  const tmpDir = mkdtempSync("/tmp/gitlab-rebase-cache-test-");
+
+  mockMRs = [{ iid: 1, title: "Old title", merge_commit_sha: "abc" }];
+  mockCommits.set(1, []);
+  await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
+
+  mockMRs = [{ iid: 1, title: "Updated title", merge_commit_sha: "abc" }];
+  mockCommits.set(1, []);
+  const { stdout, exitCode } = await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
+
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain("Updated title");
+  expect(stdout).not.toContain("Old title");
 });

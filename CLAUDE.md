@@ -27,7 +27,7 @@ Use `arktype` to validate all external data (API responses, user input). Don't u
 
 Use `bun test` to run tests.
 
-Strictly no unit/implementation tests. All tests must exercise the command like a user would — spawn the CLI as a subprocess and assert on its stdout, stderr, exit code, and side effects.
+Strictly no unit/implementation tests. All tests must exercise the command like a user would — call `main()` from `index.ts` via the `run()` helper in `cli.test.ts`, and assert on the captured stdout, stderr, exit code, and side effects. The `run()` helper patches `process.env`, intercepts `console.log`/`process.stderr.write` to capture output, and accepts a `stdin` string that is fed to `getAuth` line-by-line.
 
 ```ts#index.test.ts
 import { test, expect } from "bun:test";

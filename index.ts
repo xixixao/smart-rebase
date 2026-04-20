@@ -1,48 +1,54 @@
 import { createCli } from "./cli";
 import { getAuth } from "./auth";
-import { fetchRecentMergedMRs } from "./gitlab";
+import { fetchRecentMergedMRs, type MRWithCommits } from "./gitlab";
 import { readCache, writeCache } from "./storage";
 
-const argv = await createCli().parseAsync();
+export async function main(
+  args: string[],
+  opts: { cwd?: string; stdinLines?: AsyncIterator<string> } = {}
+): Promise<void> {
+  const cwd = opts.cwd ?? process.cwd();
+  const argv = await createCli(args).parseAsync();
 
-if (argv.verbose) {
-  console.log("Verbose mode enabled");
-}
+  if (argv.verbose) {
+    console.log("Verbose mode enabled");
+  }
 
-if (argv.sha) {
-  const headSha = await Bun.$`git rev-parse --short HEAD`.text();
-  console.log(headSha.trim());
-}
+  if (argv.sha) {
+    const headSha = await Bun.$`git rev-parse --short HEAD`.cwd(cwd).text();
+    console.log(headSha.trim());
+  }
 
-const auth = await getAuth();
+  const auth = await getAuth(opts.stdinLines);
 
-const gitlabUrl = process.env.GITLAB_URL ?? "https://gitlab.com";
-const projectId = await getProjectId();
+  const gitlabUrl = process.env.GITLAB_URL ?? "https://gitlab.com";
+  const projectId = await getProjectId(cwd);
 
-const [fresh, cached] = await Promise.all([
-  fetchRecentMergedMRs({ baseUrl: gitlabUrl, projectId, token: auth.token }),
-  readCache(gitlabUrl, projectId),
-]);
+  const [fresh, cached] = await Promise.all([
+    fetchRecentMergedMRs({ baseUrl: gitlabUrl, projectId, token: auth.token }),
+    readCache(gitlabUrl, projectId),
+  ]);
 
-const byIid = new Map<number, MRWithCommits>();
-for (const entry of cached ?? []) byIid.set(entry.mr.iid, entry);
-for (const entry of fresh) byIid.set(entry.mr.iid, entry);
-const mrsWithCommits = [...byIid.values()].sort((a, b) => b.mr.iid - a.mr.iid);
+  const byIid = new Map<number, MRWithCommits>();
+  for (const entry of cached ?? []) byIid.set(entry.mr.iid, entry);
+  for (const entry of fresh) byIid.set(entry.mr.iid, entry);
+  const mrsWithCommits = [...byIid.values()].sort((a, b) => b.mr.iid - a.mr.iid);
 
-await writeCache(gitlabUrl, projectId, mrsWithCommits);
+  await writeCache(gitlabUrl, projectId, mrsWithCommits);
 
-for (const { mr, commits } of mrsWithCommits) {
-  console.log(`!${mr.iid} ${mr.title}`);
-  for (const commit of commits) {
-    console.log(`  ${commit.short_id} ${commit.title}`);
+  for (const { mr, commits } of mrsWithCommits) {
+    console.log(`!${mr.iid} ${mr.title}`);
+    for (const commit of commits) {
+      console.log(`  ${commit.short_id} ${commit.title}`);
+    }
   }
 }
 
-async function getProjectId(): Promise<string> {
+async function getProjectId(cwd: string): Promise<string> {
   if (process.env.GITLAB_PROJECT) {
     return process.env.GITLAB_PROJECT;
   }
-  const remoteUrl = await resolveGitLabRemoteUrl();
+  const remoteUrl = await resolveGitLabRemoteUrl(cwd);
   if (remoteUrl !== null) {
     const match = remoteUrl.match(/gitlab\.com[:/](.+?)(?:\.git)?$/);
     if (match) return match[1];
@@ -52,10 +58,10 @@ async function getProjectId(): Promise<string> {
   );
 }
 
-async function resolveGitLabRemoteUrl(): Promise<string | null> {
+async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {
   let output: string;
   try {
-    output = (await Bun.$`git remote`.quiet().text()).trim();
+    output = (await Bun.$`git remote`.cwd(cwd).quiet().text()).trim();
   } catch {
     return null;
   }
@@ -71,8 +77,15 @@ async function resolveGitLabRemoteUrl(): Promise<string | null> {
   }
 
   try {
-    return (await Bun.$`git remote get-url ${remoteName}`.quiet().text()).trim();
+    return (await Bun.$`git remote get-url ${remoteName}`.cwd(cwd).quiet().text()).trim();
   } catch {
     return null;
   }
+}
+
+if (import.meta.main) {
+  main(process.argv.slice(2)).catch((e: unknown) => {
+    process.stderr.write((e instanceof Error ? e.message : String(e)) + "\n");
+    process.exit(1);
+  });
 }

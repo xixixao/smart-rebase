@@ -10,13 +10,14 @@ export interface GitLabAuth {
   token: string;
 }
 
-const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: false });
-const stdinLines = rl[Symbol.asyncIterator]();
+let _defaultStdinLines: AsyncIterator<string> | undefined;
 
-async function prompt(question: string): Promise<string> {
-  process.stderr.write(question);
-  const result = await stdinLines.next();
-  return result.done ? "" : result.value.trim();
+function getDefaultStdinLines(): AsyncIterator<string> {
+  if (!_defaultStdinLines) {
+    const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: false });
+    _defaultStdinLines = rl[Symbol.asyncIterator]();
+  }
+  return _defaultStdinLines;
 }
 
 async function openBrowser(url: string): Promise<void> {
@@ -66,7 +67,15 @@ async function saveSettings(auth: GitLabAuth): Promise<string | null> {
   }
 }
 
-export async function getAuth(): Promise<GitLabAuth> {
+export async function getAuth(stdinLines?: AsyncIterator<string>): Promise<GitLabAuth> {
+  const lines = stdinLines ?? getDefaultStdinLines();
+
+  async function prompt(question: string): Promise<string> {
+    process.stderr.write(question);
+    const result = await lines.next();
+    return result.done ? "" : result.value.trim();
+  }
+
   const saved = await loadSettings();
 
   let username = process.env.GITLAB_USERNAME ?? saved.username;

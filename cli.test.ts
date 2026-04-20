@@ -1,9 +1,8 @@
 import { test, expect, afterAll, beforeEach } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
-
-const GITLAB_TOKEN_URL =
-  "https://gitlab.com/-/user_settings/personal_access_tokens?name=gitlab-rebase&scopes=api";
+import { main } from "./index";
+import { GITLAB_TOKEN_URL } from "./auth";
 
 const testConfigDir = mkdtempSync("/tmp/gitlab-rebase-test-config-");
 const testCredsFile = join(testConfigDir, "gitlab-rebase", "credentials.json");
@@ -52,49 +51,72 @@ async function run(
     cwd?: string;
   } = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const processEnv: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined) processEnv[k] = v;
-  }
-
-  const spawnEnv: Record<string, string> = {
-    ...processEnv,
+  const testEnv: Record<string, string | undefined> = {
     GITLAB_USERNAME: "testuser",
     GITLAB_TOKEN: "testtoken",
     GITLAB_URL,
     GITLAB_PROJECT: "testgroup/testrepo",
     XDG_CONFIG_HOME: testConfigDir,
     GITLAB_CACHE_DIR: mkdtempSync("/tmp/gitlab-rebase-test-"),
+    ...opts.env,
   };
 
-  for (const [k, v] of Object.entries(opts.env ?? {})) {
-    if (v === undefined) {
-      delete spawnEnv[k];
+  const savedEnv: Record<string, string | undefined> = {};
+  for (const key of Object.keys(testEnv)) {
+    savedEnv[key] = process.env[key];
+    if (testEnv[key] === undefined) {
+      delete process.env[key];
     } else {
-      spawnEnv[k] = v;
+      process.env[key] = testEnv[key];
     }
   }
 
-  const proc = Bun.spawn(["bun", "run", join(import.meta.dir, "index.ts"), ...args], {
-    cwd: opts.cwd ?? import.meta.dir,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: spawnEnv,
-    stdin: opts.stdin !== undefined ? "pipe" : "ignore",
-  });
+  const stdinLines = makeStdinIterator(opts.stdin ?? "");
 
-  if (opts.stdin !== undefined && proc.stdin) {
-    proc.stdin.write(opts.stdin);
-    await proc.stdin.flush();
-    proc.stdin.end();
+  let stdoutBuffer = "";
+  let stderrBuffer = "";
+  const origLog = console.log;
+  const origStderrWrite = process.stderr.write;
+
+  console.log = (...args: unknown[]) => {
+    stdoutBuffer += args.map(String).join(" ") + "\n";
+  };
+  (process.stderr as any).write = (chunk: string | Uint8Array) => {
+    stderrBuffer += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+    return true;
+  };
+
+  let exitCode = 0;
+  try {
+    await main(args, { cwd: opts.cwd ?? import.meta.dir, stdinLines });
+  } catch (e: unknown) {
+    exitCode = 1;
+    stderrBuffer += (e instanceof Error ? e.message : String(e)) + "\n";
+  } finally {
+    console.log = origLog;
+    (process.stderr as any).write = origStderrWrite;
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = val;
+      }
+    }
   }
 
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { stdout, stderr, exitCode };
+  return { stdout: stdoutBuffer, stderr: stderrBuffer, exitCode };
+}
+
+function makeStdinIterator(input: string): AsyncIterator<string> {
+  const lines = input.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  let i = 0;
+  return {
+    async next() {
+      if (i < lines.length) return { value: lines[i++], done: false as const };
+      return { value: "" as string, done: true as const };
+    },
+  };
 }
 
 async function makeBrowserScript(): Promise<{ browserScript: string; browserLog: string }> {

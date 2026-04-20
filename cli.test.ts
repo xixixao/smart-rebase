@@ -1,9 +1,12 @@
 import { test, expect, afterAll, beforeEach } from "bun:test";
-import { existsSync, mkdtempSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { join, dirname } from "node:path";
 
 const GITLAB_TOKEN_URL =
   "https://gitlab.com/-/user_settings/personal_access_tokens?name=gitlab-rebase&scopes=api";
+
+const testConfigDir = mkdtempSync("/tmp/gitlab-rebase-test-config-");
+const testCredsFile = join(testConfigDir, "gitlab-rebase", "credentials.json");
 
 let mockMRs: object[] = [];
 const mockCommits = new Map<number, object[]>();
@@ -28,11 +31,15 @@ const mockGitLab = Bun.serve({
   },
 });
 
-afterAll(() => mockGitLab.stop());
+afterAll(() => {
+  mockGitLab.stop();
+  rmSync(testConfigDir, { recursive: true, force: true });
+});
 beforeEach(() => {
   mockMRs = [];
   mockCommits.clear();
   lastRequestedProject = "";
+  try { rmSync(testCredsFile); } catch {}
 });
 
 const GITLAB_URL = `http://localhost:${mockGitLab.port}`;
@@ -56,6 +63,7 @@ async function run(
     GITLAB_TOKEN: "testtoken",
     GITLAB_URL,
     GITLAB_PROJECT: "testgroup/testrepo",
+    XDG_CONFIG_HOME: testConfigDir,
   };
 
   for (const [k, v] of Object.entries(opts.env ?? {})) {
@@ -350,4 +358,44 @@ test("errors when multiple remotes exist and none is named origin", async () => 
   });
   expect(exitCode).not.toBe(0);
   expect(stderr).toContain("GITLAB_PROJECT");
+});
+
+// --- credentials storage tests ---
+
+test("saves credentials to settings file when prompted and prints the path", async () => {
+  const { stderr, exitCode } = await run([], {
+    env: { GITLAB_USERNAME: undefined, GITLAB_TOKEN: undefined },
+    stdin: "myuser\nmytoken\n",
+  });
+  expect(exitCode).toBe(0);
+  expect(stderr).toContain("Credentials saved to");
+  expect(stderr).toContain(testConfigDir);
+  const creds = await Bun.file(testCredsFile).json();
+  expect(creds.username).toBe("myuser");
+  expect(creds.token).toBe("mytoken");
+});
+
+test("loads credentials from settings file when env vars are not set", async () => {
+  mkdirSync(dirname(testCredsFile), { recursive: true });
+  await Bun.write(testCredsFile, JSON.stringify({ username: "saveduser", token: "savedtoken" }));
+
+  const { stderr, exitCode } = await run([], {
+    env: { GITLAB_USERNAME: undefined, GITLAB_TOKEN: undefined },
+  });
+  expect(exitCode).toBe(0);
+  expect(stderr).not.toContain("GITLAB_USERNAME is not set");
+  expect(stderr).not.toContain("GITLAB_TOKEN is not set");
+});
+
+test("env vars take precedence over saved credentials", async () => {
+  mkdirSync(dirname(testCredsFile), { recursive: true });
+  await Bun.write(testCredsFile, JSON.stringify({ username: "saveduser", token: "savedtoken" }));
+
+  const { stderr, exitCode } = await run([], {
+    env: { GITLAB_USERNAME: "envuser", GITLAB_TOKEN: "envtoken" },
+  });
+  expect(exitCode).toBe(0);
+  expect(stderr).not.toContain("GITLAB_USERNAME is not set");
+  expect(stderr).not.toContain("GITLAB_TOKEN is not set");
+  expect(stderr).not.toContain("Credentials saved");
 });

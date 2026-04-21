@@ -59,9 +59,13 @@ async function getProjectId(cwd: string): Promise<string> {
 }
 
 async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {
-  const output = await Bun.$`git remote`.cwd(cwd).quiet().text().catch(() => null);
-  if (output === null) return null;
-  const remotes = output.trim().split("\n").map((r) => r.trim()).filter(Boolean);
+  let output: string;
+  try {
+    output = (await Bun.$`git remote`.cwd(cwd).quiet().text()).trim();
+  } catch {
+    return null;
+  }
+  const remotes = output ? output.split("\n").map((r) => r.trim()).filter(Boolean) : [];
 
   let remoteName: string;
   if (remotes.includes("origin")) {
@@ -72,7 +76,6 @@ async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {
     return null;
   }
 
-  return Bun.$`git remote get-url ${remoteName}`.cwd(cwd).quiet().text()
-    .then((u) => u.trim());
+  return (await Bun.$`git remote get-url ${remoteName}`.cwd(cwd).quiet().text()).trim();
 }
 

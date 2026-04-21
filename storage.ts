@@ -45,8 +45,12 @@ export async function readCache(
   const file = Bun.file(cachePath(baseUrl, projectId));
   if (!(await file.exists())) return null;
 
-  const raw: unknown = await file.json().catch(() => undefined);
-  if (raw === undefined) return null;
+  let raw: unknown;
+  try {
+    raw = await file.json();
+  } catch {
+    return null;
+  }
 
   const data = CacheFile(raw);
   if (data instanceof type.errors) return null;

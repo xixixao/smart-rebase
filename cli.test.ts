@@ -1,4 +1,4 @@
-import { test, expect, afterAll, beforeEach } from "bun:test";
+import { test, expect, afterAll, beforeEach, jest } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { main } from "./index";
@@ -251,6 +251,15 @@ test("opens browser when user presses Enter on token prompt", async () => {
   expect(openedUrl.trim()).toBe(GITLAB_TOKEN_URL);
 });
 
+test("continues normally when browser command fails to launch", async () => {
+  const { exitCode, stderr } = await run([], {
+    env: { GITLAB_TOKEN: undefined, BROWSER: "false" },
+    stdin: "\nmytoken\n",
+  });
+  expect(exitCode).toBe(0);
+  expect(stderr).toContain("Enter your GitLab API token");
+});
+
 test("does not open browser when token is pasted directly", async () => {
   const { browserScript, browserLog } = await makeBrowserScript();
   const { exitCode } = await run([], {
@@ -421,6 +430,36 @@ test("loads credentials from settings file when env vars are not set", async () 
   expect(exitCode).toBe(0);
   expect(stderr).not.toContain("GITLAB_USERNAME is not set");
   expect(stderr).not.toContain("GITLAB_TOKEN is not set");
+});
+
+test("saves credentials to macOS Library path when on darwin", async () => {
+  const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
+  const spy = jest.spyOn(process, "platform", "get").mockReturnValue("darwin" as NodeJS.Platform);
+  try {
+    const { exitCode } = await run([], {
+      env: { GITLAB_USERNAME: undefined, GITLAB_TOKEN: undefined, HOME: tmpHome, XDG_CONFIG_HOME: undefined },
+      stdin: "myuser\nmytoken\n",
+    });
+    expect(exitCode).toBe(0);
+    expect(existsSync(join(tmpHome, "Library", "Application Support", "gitlab-rebase", "credentials.json"))).toBe(true);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test("saves credentials to APPDATA path when on win32", async () => {
+  const tmpAppData = mkdtempSync("/tmp/gitlab-rebase-test-appdata-");
+  const spy = jest.spyOn(process, "platform", "get").mockReturnValue("win32" as NodeJS.Platform);
+  try {
+    const { exitCode } = await run([], {
+      env: { GITLAB_USERNAME: undefined, GITLAB_TOKEN: undefined, APPDATA: tmpAppData, XDG_CONFIG_HOME: undefined },
+      stdin: "myuser\nmytoken\n",
+    });
+    expect(exitCode).toBe(0);
+    expect(existsSync(join(tmpAppData, "gitlab-rebase", "credentials.json"))).toBe(true);
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test("env vars take precedence over saved credentials", async () => {

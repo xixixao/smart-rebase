@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import { join, dirname } from "node:path";
 import { mkdir } from "node:fs/promises";
+import { openBrowser } from "./manual/openBrowser";
 
 export const GITLAB_TOKEN_URL =
   "https://gitlab.com/-/user_settings/personal_access_tokens?name=gitlab-rebase&scopes=api";
@@ -18,15 +19,6 @@ function getDefaultStdinLines(): AsyncIterator<string> {
     _defaultStdinLines = rl[Symbol.asyncIterator]();
   }
   return _defaultStdinLines;
-}
-
-async function openBrowser(url: string): Promise<void> {
-  const cmd =
-    process.env.BROWSER ??
-    (process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open");
-  try {
-    await Bun.$`${cmd} ${url}`.quiet();
-  } catch {}
 }
 
 function getSettingsPath(): string {

@@ -76,16 +76,6 @@ async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {
     return null;
   }
 
-  try {
-    return (await Bun.$`git remote get-url ${remoteName}`.cwd(cwd).quiet().text()).trim();
-  } catch {
-    return null;
-  }
+  return (await Bun.$`git remote get-url ${remoteName}`.cwd(cwd).quiet().text()).trim();
 }
 
-if (import.meta.main) {
-  main(process.argv.slice(2)).catch((e: unknown) => {
-    process.stderr.write((e instanceof Error ? e.message : String(e)) + "\n");
-    process.exit(1);
-  });
-}

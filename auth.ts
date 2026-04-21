@@ -21,7 +21,6 @@ function getDefaultStdinLines(): AsyncIterator<string> {
   return _defaultStdinLines;
 }
 
-
 function getSettingsPath(): string {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
   if (process.platform === "darwin") {

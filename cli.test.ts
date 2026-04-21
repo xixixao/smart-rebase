@@ -726,7 +726,7 @@ test("exits with error when all commits have already been merged", async () => {
 
   const { stderr, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).not.toBe(0);
-  expect(stderr.trim()).toBe("All 1 commit on feature have already been merged to main.");
+  expect(stderr.trim()).toBe("All 1 commit on feature has already been merged to main.");
 });
 
 test("exits with error when target branch does not exist", async () => {

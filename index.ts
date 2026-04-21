@@ -75,7 +75,7 @@ export async function main(
 
   if (willRebaseCount === 0) {
     throw new Error(
-      `All ${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit" : "commits"} on ${currentBranch} have already been merged to ${target}.`
+      `All ${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit" : "commits"} on ${currentBranch} ${alreadyMergedCount === 1 ? "has" : "have"} already been merged to ${target}.`
     );
   }
 

@@ -333,10 +333,11 @@ test("prints merged MRs with their commits", async () => {
   expect(stdout).toContain("sha3ful Add test for fix");
 });
 
-test("outputs nothing when there are no merged MRs", async () => {
+test("outputs only the rebase summary when there are no merged MRs", async () => {
   const { stdout, exitCode } = await run([]);
   expect(exitCode).toBe(0);
-  expect(stdout.trim()).toBe("");
+  expect(stdout).toContain("Rebasing");
+  expect(stdout).not.toContain("!");
 });
 
 test("fetches commits for all MRs", async () => {

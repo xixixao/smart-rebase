@@ -29,9 +29,11 @@ export async function main(
   const projectId = await getProjectId(cwd);
 
   const baseSha = await getBaseSha(cwd, target);
-  const [baseDate, targetShas, cached] = await Promise.all([
+  const [baseDate, targetShas, currentBranch, currentBranchShas, cached] = await Promise.all([
     getBaseCommitDate(cwd, baseSha),
     getTargetShas(cwd, baseSha, target),
+    getCurrentBranch(cwd),
+    getCurrentBranchShas(cwd, baseSha),
     readCache(gitlabUrl, projectId),
   ]);
 
@@ -56,6 +58,16 @@ export async function main(
       new Date(mr.merged_at) >= sinceDate &&
       ((mr.merge_commit_sha !== null && targetShas.has(mr.merge_commit_sha)) ||
         commits.some((c) => targetShas.has(c.id)))
+  );
+
+  const mergedCommitIds = new Set<string>();
+  for (const { commits } of mrsWithCommits) {
+    for (const commit of commits) mergedCommitIds.add(commit.id);
+  }
+  const alreadyMergedCount = currentBranchShas.filter((sha) => mergedCommitIds.has(sha)).length;
+  const willRebaseCount = currentBranchShas.length - alreadyMergedCount;
+  console.log(
+    `Rebasing ${currentBranch} onto ${target}. ${alreadyMergedCount} commits have already been merged to ${target}. Will rebase ${willRebaseCount} commits.`
   );
 
   for (const { mr, commits } of mrsWithCommits) {
@@ -108,6 +120,16 @@ async function getTargetShas(cwd: string, baseSha: string, target: string): Prom
   ).trim();
   if (!out) return new Set();
   return new Set(out.split("\n").map((s) => s.trim()).filter(Boolean));
+}
+
+async function getCurrentBranch(cwd: string): Promise<string> {
+  return (await Bun.$`git rev-parse --abbrev-ref HEAD`.cwd(cwd).quiet().text()).trim();
+}
+
+async function getCurrentBranchShas(cwd: string, baseSha: string): Promise<string[]> {
+  const out = (await Bun.$`git log ${baseSha}..HEAD --format=%H`.cwd(cwd).quiet().text()).trim();
+  if (!out) return [];
+  return out.split("\n").map((s) => s.trim()).filter(Boolean);
 }
 
 async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {

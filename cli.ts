@@ -4,7 +4,14 @@ import { hideBin } from "yargs/helpers";
 export function createCli(argv = hideBin(process.argv)) {
   return yargs(argv)
     .scriptName("gitlab-rebase")
-    .usage("$0 [options]")
+    .usage("$0 [target] [options]")
+    .command("$0 [target]", false, (yargs) =>
+      yargs.positional("target", {
+        type: "string",
+        description: "Target branch to rebase onto",
+        default: "main",
+      })
+    )
     .version("0.1.0")
     .alias("version", "V")
     .help()
@@ -25,4 +32,6 @@ export function createCli(argv = hideBin(process.argv)) {
     .exitProcess(false);
 }
 
-export type Argv = Awaited<ReturnType<ReturnType<typeof createCli>["parseAsync"]>>;
+export type Argv = Awaited<ReturnType<ReturnType<typeof createCli>["parseAsync"]>> & {
+  target: string;
+};

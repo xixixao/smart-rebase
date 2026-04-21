@@ -75,12 +75,14 @@ export async function main(
 
   if (willRebaseCount === 0) {
     throw new Error(
-      `All ${alreadyMergedCount} commits on ${currentBranch} have already been merged to ${target}.`
+      `All ${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit" : "commits"} on ${currentBranch} have already been merged to ${target}.`
     );
   }
 
+  const mergedStr = `${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit" : "commits"}`;
+  const willRebaseStr = `${willRebaseCount} ${willRebaseCount === 1 ? "commit" : "commits"}`;
   console.log(
-    `Rebasing ${currentBranch} onto ${target}. ${alreadyMergedCount} commits have already been merged to ${target}. Will rebase ${willRebaseCount} commits.`
+    `Rebasing ${currentBranch} onto ${target}. ${mergedStr} have already been merged to ${target}. Will rebase ${willRebaseStr}.`
   );
 
   for (const { mr, commits } of mrsWithCommits) {

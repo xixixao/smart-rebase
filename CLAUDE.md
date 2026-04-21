@@ -25,7 +25,7 @@ Use `arktype` to validate all external data (API responses, user input). Don't u
 
 ## Testing
 
-Use `bun test` to run tests.
+Use `bun test` to run tests. Coverage must stay at 100% — `bun test` reports coverage and will show any uncovered lines.
 
 Strictly no unit/implementation tests. All tests must exercise the command like a user would — call `main()` from `index.ts` via the `run()` helper in `cli.test.ts`, and assert on the captured stdout, stderr, exit code, and side effects. The `run()` helper patches `process.env`, intercepts `console.log`/`process.stderr.write` to capture output, and accepts a `stdin` string that is fed to `getAuth` line-by-line.
 

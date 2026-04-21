@@ -60,12 +60,25 @@ export async function main(
         commits.some((c) => targetShas.has(c.id)))
   );
 
+  if (currentBranchShas.length === 0) {
+    throw new Error(
+      `No commits on ${currentBranch} ahead of ${target}.`
+    );
+  }
+
   const mergedCommitIds = new Set<string>();
   for (const { commits } of mrsWithCommits) {
     for (const commit of commits) mergedCommitIds.add(commit.id);
   }
   const alreadyMergedCount = currentBranchShas.filter((sha) => mergedCommitIds.has(sha)).length;
   const willRebaseCount = currentBranchShas.length - alreadyMergedCount;
+
+  if (willRebaseCount === 0) {
+    throw new Error(
+      `All ${alreadyMergedCount} commits on ${currentBranch} have already been merged to ${target}.`
+    );
+  }
+
   console.log(
     `Rebasing ${currentBranch} onto ${target}. ${alreadyMergedCount} commits have already been merged to ${target}. Will rebase ${willRebaseCount} commits.`
   );

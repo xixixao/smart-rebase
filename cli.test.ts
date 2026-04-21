@@ -206,12 +206,7 @@ test("unknown flag exits with non-zero code", async () => {
 });
 
 test("--sha prints HEAD short sha", async () => {
-  const GIT_DATE = "2020-01-01T00:00:00+00:00";
-  const repoPath = await makeGitRepo();
-  await Bun.$`git commit --allow-empty -m "Dated commit"`
-    .cwd(repoPath)
-    .env({ ...process.env, GIT_AUTHOR_DATE: GIT_DATE, GIT_COMMITTER_DATE: GIT_DATE })
-    .quiet();
+  const { repoPath } = await makeRepoWithDivergedBranch();
   const expectedSha = (await Bun.$`git rev-parse --short HEAD`.cwd(repoPath).text()).trim();
 
   const { stdout, exitCode } = await run(["--sha"], { cwd: repoPath });
@@ -400,10 +395,9 @@ test("detects project from the sole remote when it is not named origin", async (
 });
 
 test("uses origin when both origin and another remote exist", async () => {
-  const repoPath = await makeGitRepo({
-    origin: "git@gitlab.com:maingroup/mainproject.git",
-    fork: "git@gitlab.com:forkgroup/forkproject.git",
-  });
+  const { repoPath } = await makeRepoWithDivergedBranch();
+  await Bun.$`git remote add origin git@gitlab.com:maingroup/mainproject.git`.cwd(repoPath).quiet();
+  await Bun.$`git remote add fork git@gitlab.com:forkgroup/forkproject.git`.cwd(repoPath).quiet();
 
   const { exitCode } = await run([], {
     cwd: repoPath,
@@ -713,6 +707,25 @@ test("excludes MRs where merged_at is before base commit date", async () => {
   const { stdout, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).toBe(0);
   expect(stdout).not.toContain("!4 Old merged MR");
+});
+
+test("exits with error when branch has no commits ahead of target", async () => {
+  const repoPath = await makeGitRepo();
+  // HEAD == merge-base with main → 0 current-branch commits
+  const { stderr, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("No commits on");
+});
+
+test("exits with error when all commits have already been merged", async () => {
+  const { repoPath, mainCommitShas } = await makeRepoWithDivergedBranch();
+  const featureSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
+  mockMRs = [{ iid: 1, title: "Feature MR", merge_commit_sha: mainCommitShas[0], merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(1, [{ id: featureSha, short_id: featureSha.slice(0, 8), title: "feature work" }]);
+
+  const { stderr, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("already been merged");
 });
 
 test("exits with error when target branch does not exist", async () => {

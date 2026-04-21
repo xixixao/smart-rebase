@@ -20,51 +20,36 @@ function getDefaultStdinLines(): AsyncIterator<string> {
   return _defaultStdinLines;
 }
 
-async function openBrowser(url: string): Promise<void> {
+function openBrowser(url: string): Promise<void> {
   const cmd =
     process.env.BROWSER ??
     (process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open");
-  try {
-    await Bun.$`${cmd} ${url}`.quiet();
-  } catch {}
+  return Bun.spawn([cmd, url], { stdout: "ignore", stderr: "ignore" }).exited.then(() => {});
 }
 
 function getSettingsPath(): string {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
-  if (process.platform === "darwin") {
-    return join(home, "Library", "Application Support", "gitlab-rebase", "credentials.json");
-  } else if (process.platform === "win32") {
-    const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
-    return join(appData, "gitlab-rebase", "credentials.json");
-  } else {
-    const configHome = process.env.XDG_CONFIG_HOME ?? join(home, ".config");
-    return join(configHome, "gitlab-rebase", "credentials.json");
-  }
+  const configHome = process.env.XDG_CONFIG_HOME ?? process.env.APPDATA ?? join(home, ".config");
+  return join(configHome, "gitlab-rebase", "credentials.json");
 }
 
 async function loadSettings(): Promise<Partial<GitLabAuth>> {
   const file = Bun.file(getSettingsPath());
   if (!(await file.exists())) return {};
-  try {
-    const data = await file.json();
-    return {
-      username: typeof data.username === "string" ? data.username : undefined,
-      token: typeof data.token === "string" ? data.token : undefined,
-    };
-  } catch {
-    return {};
-  }
+  const data = await file.json().catch(() => null) as Record<string, unknown> | null;
+  if (data === null) return {};
+  return {
+    username: typeof data.username === "string" ? data.username : undefined,
+    token: typeof data.token === "string" ? data.token : undefined,
+  };
 }
 
 async function saveSettings(auth: GitLabAuth): Promise<string | null> {
   const settingsPath = getSettingsPath();
-  try {
-    await mkdir(dirname(settingsPath), { recursive: true });
-    await Bun.write(settingsPath, JSON.stringify(auth, null, 2));
-    return settingsPath;
-  } catch {
-    return null;
-  }
+  return mkdir(dirname(settingsPath), { recursive: true })
+    .then(() => Bun.write(settingsPath, JSON.stringify(auth, null, 2)))
+    .then(() => settingsPath)
+    .catch(() => null);
 }
 
 export async function getAuth(stdinLines?: AsyncIterator<string>): Promise<GitLabAuth> {

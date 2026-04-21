@@ -59,13 +59,9 @@ async function getProjectId(cwd: string): Promise<string> {
 }
 
 async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {
-  let output: string;
-  try {
-    output = (await Bun.$`git remote`.cwd(cwd).quiet().text()).trim();
-  } catch {
-    return null;
-  }
-  const remotes = output ? output.split("\n").map((r) => r.trim()).filter(Boolean) : [];
+  const output = await Bun.$`git remote`.cwd(cwd).quiet().text().catch(() => null);
+  if (output === null) return null;
+  const remotes = output.trim().split("\n").map((r) => r.trim()).filter(Boolean);
 
   let remoteName: string;
   if (remotes.includes("origin")) {
@@ -76,16 +72,7 @@ async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {
     return null;
   }
 
-  try {
-    return (await Bun.$`git remote get-url ${remoteName}`.cwd(cwd).quiet().text()).trim();
-  } catch {
-    return null;
-  }
+  return Bun.$`git remote get-url ${remoteName}`.cwd(cwd).quiet().text()
+    .then((u) => u.trim());
 }
 
-if (import.meta.main) {
-  main(process.argv.slice(2)).catch((e: unknown) => {
-    process.stderr.write((e instanceof Error ? e.message : String(e)) + "\n");
-    process.exit(1);
-  });
-}

@@ -1,5 +1,5 @@
 import { test, expect, afterAll, beforeEach } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { main } from "./index";
 import { GITLAB_TOKEN_URL } from "./auth";
@@ -10,6 +10,9 @@ const testCredsFile = join(testConfigDir, "gitlab-rebase", "credentials.json");
 let mockMRs: object[] = [];
 const mockCommits = new Map<number, object[]>();
 let lastRequestedProject = "";
+let mockMRsError = false;
+let mockMRsStatusCode = 200;
+let mockCommitsErrorIid: number | null = null;
 
 const mockGitLab = Bun.serve({
   port: 0,
@@ -21,9 +24,15 @@ const mockGitLab = Bun.serve({
 
     const commitsMatch = pathname.match(/\/merge_requests\/(\d+)\/commits$/);
     if (commitsMatch) {
-      return Response.json(mockCommits.get(parseInt(commitsMatch[1])) ?? []);
+      const iid = parseInt(commitsMatch[1]);
+      if (mockCommitsErrorIid !== null && iid === mockCommitsErrorIid) {
+        return new Response("Internal Server Error", { status: 500 });
+      }
+      return Response.json(mockCommits.get(iid) ?? []);
     }
     if (pathname.match(/\/merge_requests$/)) {
+      if (mockMRsStatusCode !== 200) return new Response("Server Error", { status: mockMRsStatusCode });
+      if (mockMRsError) return Response.json([{ iid: "not-a-number", title: "Bad", merge_commit_sha: null }]);
       return Response.json(mockMRs);
     }
     return new Response("Not Found", { status: 404 });
@@ -38,6 +47,9 @@ beforeEach(() => {
   mockMRs = [];
   mockCommits.clear();
   lastRequestedProject = "";
+  mockMRsError = false;
+  mockMRsStatusCode = 200;
+  mockCommitsErrorIid = null;
   try { rmSync(testCredsFile); } catch {}
 });
 
@@ -49,6 +61,7 @@ async function run(
     env?: Record<string, string | undefined>;
     stdin?: string;
     cwd?: string;
+    omitStdin?: boolean;
   } = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const testEnv: Record<string, string | undefined> = {
@@ -88,7 +101,7 @@ async function run(
 
   let exitCode = 0;
   try {
-    await main(args, { cwd: opts.cwd ?? import.meta.dir, stdinLines });
+    await main(args, { cwd: opts.cwd ?? import.meta.dir, ...(opts.omitStdin ? {} : { stdinLines }) });
   } catch (e: unknown) {
     exitCode = 1;
     stderrBuffer += (e instanceof Error ? e.message : String(e)) + "\n";
@@ -455,4 +468,107 @@ test("fresh data replaces cached version of same MR", async () => {
   expect(exitCode).toBe(0);
   expect(stdout).toContain("Updated title");
   expect(stdout).not.toContain("Old title");
+});
+
+// --- error handling tests ---
+
+test("handles invalid JSON in credentials file by prompting again", async () => {
+  mkdirSync(dirname(testCredsFile), { recursive: true });
+  writeFileSync(testCredsFile, "not valid json{{{");
+
+  const { stderr, exitCode } = await run([], {
+    env: { GITLAB_USERNAME: undefined, GITLAB_TOKEN: undefined },
+    stdin: "myuser\nmytoken\n",
+  });
+  expect(exitCode).toBe(0);
+  expect(stderr).toContain("GITLAB_USERNAME is not set");
+});
+
+test("exits with error when MRs API returns non-OK HTTP status", async () => {
+  mockMRsStatusCode = 500;
+  const { stderr, exitCode } = await run([]);
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("500");
+});
+
+test("exits with error when GitLab returns invalid MR format", async () => {
+  mockMRsError = true;
+  const { stderr, exitCode } = await run([]);
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("Invalid MR list");
+});
+
+test("exits with error when commits API returns an error", async () => {
+  mockMRs = [{ iid: 99, title: "Some MR", merge_commit_sha: null }];
+  mockCommitsErrorIid = 99;
+
+  const { stderr, exitCode } = await run([]);
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("500");
+});
+
+test("exits with error when cwd is not a git repository", async () => {
+  const nonGitDir = mkdtempSync("/tmp/gitlab-rebase-not-git-");
+  const { stderr, exitCode } = await run([], {
+    cwd: nonGitDir,
+    env: { GITLAB_PROJECT: undefined },
+  });
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("GITLAB_PROJECT");
+});
+
+test("exits with error when remote exists but has no URL configured", async () => {
+  const repoPath = mkdtempSync("/tmp/gitlab-rebase-broken-remote-");
+  await Bun.$`git init`.cwd(repoPath).quiet();
+  await Bun.$`git remote add origin git@gitlab.com:foo/bar`.cwd(repoPath).quiet();
+  await Bun.$`git config --unset remote.origin.url`.cwd(repoPath).quiet();
+
+  const { stderr, exitCode } = await run([], {
+    cwd: repoPath,
+    env: { GITLAB_PROJECT: undefined },
+  });
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("GITLAB_PROJECT");
+});
+
+test("uses default cache directory when GITLAB_CACHE_DIR is not set", async () => {
+  const homeDir = mkdtempSync("/tmp/gitlab-rebase-home-");
+  const { exitCode } = await run([], {
+    env: { GITLAB_CACHE_DIR: undefined, HOME: homeDir },
+  });
+  expect(exitCode).toBe(0);
+  expect(existsSync(join(homeDir, ".cache", "gitlab-rebase"))).toBe(true);
+});
+
+test("uses readline for stdin when no stdinLines are provided", async () => {
+  // GITLAB_USERNAME and GITLAB_TOKEN are set by default so no prompting happens;
+  // getDefaultStdinLines() is called but never read from
+  const { exitCode } = await run([], { omitStdin: true });
+  expect(exitCode).toBe(0);
+});
+
+test("proceeds gracefully when credentials cannot be saved", async () => {
+  // Place a file where the credentials directory should be so mkdir fails
+  const blockingBase = mkdtempSync("/tmp/gitlab-rebase-block-");
+  writeFileSync(join(blockingBase, "gitlab-rebase"), "blocker");
+
+  const { stderr, exitCode } = await run([], {
+    env: {
+      GITLAB_USERNAME: undefined,
+      GITLAB_TOKEN: undefined,
+      XDG_CONFIG_HOME: blockingBase,
+    },
+    stdin: "myuser\nmytoken\n",
+  });
+  expect(exitCode).toBe(0);
+  expect(stderr).not.toContain("Credentials saved");
+});
+
+test("handles corrupted cache file gracefully", async () => {
+  const cacheDir = mkdtempSync("/tmp/gitlab-rebase-cache-corrupt-");
+  const key = `${GITLAB_URL}:testgroup/testrepo`.replace(/[^a-zA-Z0-9.-]/g, "_");
+  writeFileSync(join(cacheDir, `${key}.json`), "corrupted{{{{");
+
+  const { exitCode } = await run([], { env: { GITLAB_CACHE_DIR: cacheDir } });
+  expect(exitCode).toBe(0);
 });

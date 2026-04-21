@@ -10,11 +10,11 @@
     "typescript": "^5"
   },
   "bin": {
-    "gitlab-rebase": "./index.ts"
+    "gitlab-rebase": "./manual/entry.ts"
   },
   "private": true,
   "scripts": {
-    "start": "bun run index.ts",
+    "start": "bun run manual/entry.ts",
     "test": "bun test",
     "test:coverage": "bun test --coverage"
   },

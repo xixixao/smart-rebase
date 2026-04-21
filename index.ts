@@ -62,7 +62,7 @@ export async function main(
 
   if (currentBranchShas.length === 0) {
     throw new Error(
-      `No commits on ${currentBranch} ahead of ${target}.`
+      `No commits on branch \`${currentBranch}\` ahead of \`${target}\`.`
     );
   }
 
@@ -74,15 +74,16 @@ export async function main(
   const willRebaseCount = currentBranchShas.length - alreadyMergedCount;
 
   if (willRebaseCount === 0) {
+    const n = alreadyMergedCount;
     throw new Error(
-      `All ${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit" : "commits"} on ${currentBranch} ${alreadyMergedCount === 1 ? "has" : "have"} already been merged to ${target}.`
+      `The ${n} ${n === 1 ? "commit" : "commits"} on branch \`${currentBranch}\` ${n === 1 ? "has" : "have"} already been merged to \`${target}\`.`
     );
   }
 
   const mergedStr = `${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit" : "commits"}`;
   const willRebaseStr = `${willRebaseCount} ${willRebaseCount === 1 ? "commit" : "commits"}`;
   console.log(
-    `Rebasing ${currentBranch} onto ${target}. ${mergedStr} have already been merged to ${target}. Will rebase ${willRebaseStr}.`
+    `Rebasing \`${currentBranch}\` onto \`${target}\`. ${mergedStr} ${alreadyMergedCount === 1 ? "has" : "have"} already been merged to \`${target}\`. Will rebase ${willRebaseStr}.`
   );
 
   for (const { mr, commits } of mrsWithCommits) {

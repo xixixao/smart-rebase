@@ -10,6 +10,7 @@ const testCredsFile = join(testConfigDir, "gitlab-rebase", "credentials.json");
 let mockMRs: object[] = [];
 const mockCommits = new Map<number, object[]>();
 let lastRequestedProject = "";
+let lastMergedAfter: string | undefined;
 let mockMRsError = false;
 let mockMRsStatusCode = 200;
 let mockCommitsErrorIid: number | null = null;
@@ -31,6 +32,7 @@ const mockGitLab = Bun.serve({
       return Response.json(mockCommits.get(iid) ?? []);
     }
     if (pathname.match(/\/merge_requests$/)) {
+      lastMergedAfter = new URL(req.url).searchParams.get("merged_after") ?? undefined;
       if (mockMRsStatusCode !== 200) return new Response("Server Error", { status: mockMRsStatusCode });
       if (mockMRsError) return Response.json([{ iid: "not-a-number", title: "Bad", merge_commit_sha: null }]);
       return Response.json(mockMRs);
@@ -47,6 +49,7 @@ beforeEach(() => {
   mockMRs = [];
   mockCommits.clear();
   lastRequestedProject = "";
+  lastMergedAfter = undefined;
   mockMRsError = false;
   mockMRsStatusCode = 200;
   mockCommitsErrorIid = null;
@@ -143,7 +146,11 @@ async function makeBrowserScript(): Promise<{ browserScript: string; browserLog:
 
 async function makeGitRepo(remotes: Record<string, string> = {}): Promise<string> {
   const repoPath = mkdtempSync("/tmp/gitlab-rebase-test-");
-  await Bun.$`git init`.cwd(repoPath).quiet();
+  await Bun.$`git init -b main`.cwd(repoPath).quiet();
+  await Bun.$`git config user.email "test@example.com"`.cwd(repoPath).quiet();
+  await Bun.$`git config user.name "Test User"`.cwd(repoPath).quiet();
+  await Bun.$`git config commit.gpgsign false`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "Initial commit"`.cwd(repoPath).quiet();
   for (const [name, url] of Object.entries(remotes)) {
     await Bun.$`git remote add ${name} ${url}`.cwd(repoPath).quiet();
   }
@@ -178,10 +185,7 @@ test("unknown flag exits with non-zero code", async () => {
 test("--sha prints HEAD short sha", async () => {
   const GIT_DATE = "2020-01-01T00:00:00+00:00";
   const repoPath = await makeGitRepo();
-  await Bun.$`git config user.email "test@example.com"`.cwd(repoPath).quiet();
-  await Bun.$`git config user.name "Test User"`.cwd(repoPath).quiet();
-  await Bun.$`git config commit.gpgsign false`.cwd(repoPath).quiet();
-  await Bun.$`git commit --allow-empty -m "Initial commit"`
+  await Bun.$`git commit --allow-empty -m "Dated commit"`
     .cwd(repoPath)
     .env({ ...process.env, GIT_AUTHOR_DATE: GIT_DATE, GIT_COMMITTER_DATE: GIT_DATE })
     .quiet();
@@ -194,10 +198,6 @@ test("--sha prints HEAD short sha", async () => {
 
 test("--sha is not printed without flag", async () => {
   const repoPath = await makeGitRepo();
-  await Bun.$`git config user.email "test@example.com"`.cwd(repoPath).quiet();
-  await Bun.$`git config user.name "Test"`.cwd(repoPath).quiet();
-  await Bun.$`git config commit.gpgsign false`.cwd(repoPath).quiet();
-  await Bun.$`git commit --allow-empty -m "init"`.cwd(repoPath).quiet();
   const sha = (await Bun.$`git rev-parse --short HEAD`.cwd(repoPath).text()).trim();
 
   const { stdout } = await run([], { cwd: repoPath });
@@ -548,17 +548,13 @@ test("exits with error when commits API returns an error", async () => {
 
 test("exits with error when cwd is not a git repository", async () => {
   const nonGitDir = mkdtempSync("/tmp/gitlab-rebase-not-git-");
-  const { stderr, exitCode } = await run([], {
-    cwd: nonGitDir,
-    env: { GITLAB_PROJECT: undefined },
-  });
+  const { stderr, exitCode } = await run([], { cwd: nonGitDir });
   expect(exitCode).not.toBe(0);
-  expect(stderr).toContain("GITLAB_PROJECT");
+  expect(stderr).toContain("git repository");
 });
 
 test("exits with error when remote exists but has no URL configured", async () => {
-  const repoPath = mkdtempSync("/tmp/gitlab-rebase-broken-remote-");
-  await Bun.$`git init`.cwd(repoPath).quiet();
+  const repoPath = await makeGitRepo();
   await Bun.$`git remote add origin git@gitlab.com:foo/bar`.cwd(repoPath).quiet();
   await Bun.$`git config --unset remote.origin.url`.cwd(repoPath).quiet();
 
@@ -610,4 +606,64 @@ test("handles corrupted cache file gracefully", async () => {
 
   const { exitCode } = await run([], { env: { GITLAB_CACHE_DIR: cacheDir } });
   expect(exitCode).toBe(0);
+});
+
+// --- target branch and base commit tests ---
+
+test("defaults target branch to main", async () => {
+  const GIT_DATE = "2024-03-01T12:00:00+00:00";
+  const repoPath = await makeGitRepo();
+  await Bun.$`git commit --allow-empty -m "base"`
+    .cwd(repoPath)
+    .env({ ...process.env, GIT_AUTHOR_DATE: GIT_DATE, GIT_COMMITTER_DATE: GIT_DATE })
+    .quiet();
+  await Bun.$`git checkout -b feature`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "feature work"`.cwd(repoPath).quiet();
+
+  const { exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).toBe(0);
+  expect(lastMergedAfter).toBe(GIT_DATE);
+});
+
+test("accepts custom target branch as positional arg", async () => {
+  const GIT_DATE = "2024-06-15T08:00:00+00:00";
+  const repoPath = await makeGitRepo();
+  await Bun.$`git checkout -b release`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "release base"`
+    .cwd(repoPath)
+    .env({ ...process.env, GIT_AUTHOR_DATE: GIT_DATE, GIT_COMMITTER_DATE: GIT_DATE })
+    .quiet();
+  await Bun.$`git checkout -b feature`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "feature work"`.cwd(repoPath).quiet();
+
+  const { exitCode } = await run(["release"], { cwd: repoPath });
+  expect(exitCode).toBe(0);
+  expect(lastMergedAfter).toBe(GIT_DATE);
+});
+
+test("sends merged_after to the GitLab API based on base commit date", async () => {
+  const GIT_DATE = "2025-01-10T09:30:00+00:00";
+  const repoPath = await makeGitRepo();
+  await Bun.$`git commit --allow-empty -m "base"`
+    .cwd(repoPath)
+    .env({ ...process.env, GIT_AUTHOR_DATE: GIT_DATE, GIT_COMMITTER_DATE: GIT_DATE })
+    .quiet();
+  await Bun.$`git checkout -b feature`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "work"`.cwd(repoPath).quiet();
+
+  mockMRs = [{ iid: 7, title: "Recent MR", merge_commit_sha: "aaa" }];
+  mockCommits.set(7, []);
+
+  const { stdout, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).toBe(0);
+  expect(lastMergedAfter).toBe(GIT_DATE);
+  expect(stdout).toContain("!7 Recent MR");
+});
+
+test("exits with error when target branch does not exist", async () => {
+  const repoPath = await makeGitRepo();
+
+  const { stderr, exitCode } = await run(["nonexistent-branch"], { cwd: repoPath });
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("nonexistent-branch");
 });

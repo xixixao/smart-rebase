@@ -28,13 +28,22 @@ export async function fetchRecentMergedMRs(opts: {
   projectId: string;
   token: string;
   perPage?: number;
+  mergedAfter?: string;
 }): Promise<MRWithCommits[]> {
-  const { baseUrl, projectId, token, perPage = 20 } = opts;
+  const { baseUrl, projectId, token, perPage = 100, mergedAfter } = opts;
   const encodedProject = encodeURIComponent(projectId);
   const headers = { "PRIVATE-TOKEN": token };
 
+  const params = new URLSearchParams({
+    state: "merged",
+    order_by: "updated_at",
+    sort: "desc",
+    per_page: String(perPage),
+  });
+  if (mergedAfter) params.set("merged_after", mergedAfter);
+
   const mrsRes = await fetch(
-    `${baseUrl}/api/v4/projects/${encodedProject}/merge_requests?state=merged&order_by=updated_at&sort=desc&per_page=${perPage}`,
+    `${baseUrl}/api/v4/projects/${encodedProject}/merge_requests?${params}`,
     { headers }
   );
   if (!mrsRes.ok) {

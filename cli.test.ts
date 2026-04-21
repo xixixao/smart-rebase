@@ -331,8 +331,9 @@ test("prints merged MRs with their commits", async () => {
 test("outputs only the rebase summary when there are no merged MRs", async () => {
   const { stdout, exitCode } = await run([]);
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("Rebasing");
-  expect(stdout).not.toContain("!");
+  expect(stdout.trim()).toBe(
+    "Rebasing feature onto main. 0 commits have already been merged to main. Will rebase 1 commits."
+  );
 });
 
 test("fetches commits for all MRs", async () => {
@@ -714,7 +715,7 @@ test("exits with error when branch has no commits ahead of target", async () => 
   // HEAD == merge-base with main → 0 current-branch commits
   const { stderr, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).not.toBe(0);
-  expect(stderr).toContain("No commits on");
+  expect(stderr.trim()).toBe("No commits on main ahead of main.");
 });
 
 test("exits with error when all commits have already been merged", async () => {
@@ -725,7 +726,7 @@ test("exits with error when all commits have already been merged", async () => {
 
   const { stderr, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).not.toBe(0);
-  expect(stderr).toContain("already been merged");
+  expect(stderr.trim()).toBe("All 1 commits on feature have already been merged to main.");
 });
 
 test("exits with error when target branch does not exist", async () => {

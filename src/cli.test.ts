@@ -873,12 +873,18 @@ const REBASE_SUMMARY =
 // directly, "Skip" highlighted if they navigated down first.
 const UPDATE_PROMPT_UPDATE_SELECTED =
   "`main` is not up-to-date.\n" +
-  "❯ Update `main` from `origin`\n" +
-  "  Skip\n";
+  "\n" +
+  "❯ 1. Update `main` from `origin`\n" +
+  "  2. Skip\n" +
+  "\n" +
+  "↑↓ to navigate · Enter to select · Esc to back\n";
 const UPDATE_PROMPT_SKIP_SELECTED =
   "`main` is not up-to-date.\n" +
-  "  Update `main` from `origin`\n" +
-  "❯ Skip\n";
+  "\n" +
+  "  1. Update `main` from `origin`\n" +
+  "❯ 2. Skip\n" +
+  "\n" +
+  "↑↓ to navigate · Enter to select · Esc to back\n";
 
 async function makeRepoWithRemoteAhead(): Promise<{
   repoPath: string;

@@ -29,6 +29,8 @@ Use `bun test` to run tests. Coverage must stay at 100% — `bun test` reports c
 
 Strictly no unit/implementation tests. All tests must exercise the command like a user would — call `main()` from `index.ts` via the `run()` helper in `cli.test.ts`, and assert on the captured stdout, stderr, exit code, and side effects. The `run()` helper patches `process.env`, intercepts `console.log`/`process.stderr.write` to capture output, and accepts a `stdin` string that is fed to `getAuth` line-by-line.
 
+Never assert only a substring of output. Use `.toBe()` with the full expected string, not `.toContain()`.
+
 ```ts#index.test.ts
 import { test, expect } from "bun:test";
 

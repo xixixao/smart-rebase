@@ -767,6 +767,13 @@ test("paginates to fetch MRs until updated_at falls before base commit date", as
 
 // --- target branch update tests ---
 
+const REBASE_SUMMARY =
+  "Rebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.";
+const UPDATE_PROMPT =
+  "`main` is not up-to-date.\n" +
+  "   > 1. Update `main` from `origin`\n" +
+  "       2. Skip\n";
+
 async function makeRepoWithRemoteAhead(): Promise<{
   repoPath: string;
   remoteNewSha: string;
@@ -786,8 +793,10 @@ async function makeRepoWithRemoteAhead(): Promise<{
 }
 
 test("shows no update prompt when target has no upstream tracking", async () => {
-  const { stderr } = await run([]);
-  expect(stderr).not.toContain("not up-to-date");
+  const { stderr, stdout, exitCode } = await run([]);
+  expect(exitCode).toBe(0);
+  expect(stderr).toBe("");
+  expect(stdout.trim()).toBe(REBASE_SUMMARY);
 });
 
 test("shows no update prompt when target is already up to date with remote", async () => {
@@ -800,31 +809,36 @@ test("shows no update prompt when target is already up to date with remote", asy
   await Bun.$`git checkout -b feature`.cwd(localPath).quiet();
   await Bun.$`git commit --allow-empty -m "feature work"`.cwd(localPath).quiet();
 
-  const { stderr } = await run([], { cwd: localPath });
-  expect(stderr).not.toContain("not up-to-date");
+  const { stderr, stdout, exitCode } = await run([], { cwd: localPath });
+  expect(exitCode).toBe(0);
+  expect(stderr).toBe("");
+  expect(stdout.trim()).toBe(REBASE_SUMMARY);
 });
 
 test("shows update prompt when target branch is behind remote", async () => {
   const { repoPath } = await makeRepoWithRemoteAhead();
-  const { stderr, exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
   expect(exitCode).toBe(0);
-  expect(stderr).toContain("`main` is not up-to-date.");
-  expect(stderr).toContain("Update `main` from `origin`");
-  expect(stderr).toContain("2. Skip");
+  expect(stderr).toBe(UPDATE_PROMPT);
+  expect(stdout.trim()).toBe(REBASE_SUMMARY);
 });
 
 test("updates target branch when user selects option 1", async () => {
   const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
-  const { exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
   expect(exitCode).toBe(0);
+  expect(stderr).toBe(UPDATE_PROMPT);
+  expect(stdout.trim()).toBe(REBASE_SUMMARY);
   const localMainSha = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainSha).toBe(remoteNewSha);
 });
 
 test("updates target branch by default when user presses Enter", async () => {
   const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
-  const { exitCode } = await run([], { cwd: repoPath, stdin: "\n" });
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, stdin: "\n" });
   expect(exitCode).toBe(0);
+  expect(stderr).toBe(UPDATE_PROMPT);
+  expect(stdout.trim()).toBe(REBASE_SUMMARY);
   const localMainSha = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainSha).toBe(remoteNewSha);
 });
@@ -832,8 +846,10 @@ test("updates target branch by default when user presses Enter", async () => {
 test("skips update when user selects option 2", async () => {
   const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
   const localMainShaBefore = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
-  const { exitCode } = await run([], { cwd: repoPath, stdin: "2\n" });
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, stdin: "2\n" });
   expect(exitCode).toBe(0);
+  expect(stderr).toBe(UPDATE_PROMPT);
+  expect(stdout.trim()).toBe(REBASE_SUMMARY);
   const localMainShaAfter = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainShaAfter).toBe(localMainShaBefore);
   expect(localMainShaAfter).not.toBe(remoteNewSha);
@@ -844,7 +860,10 @@ test("exits with error when target update fails due to diverged branches", async
   await Bun.$`git checkout main`.cwd(repoPath).quiet();
   await Bun.$`git commit --allow-empty -m "local only commit"`.cwd(repoPath).quiet();
   await Bun.$`git checkout feature`.cwd(repoPath).quiet();
-  const { stderr, exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
   expect(exitCode).not.toBe(0);
-  expect(stderr).toContain("Failed to update `main` from `origin`: non-fast-forward");
+  expect(stderr).toBe(
+    UPDATE_PROMPT + "Failed to update `main` from `origin`: non-fast-forward\n"
+  );
+  expect(stdout).toBe("");
 });

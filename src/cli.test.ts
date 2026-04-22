@@ -192,6 +192,7 @@ async function run(
   const origLog = console.log;
   const origError = console.error;
   const origStderrWrite = process.stderr.write;
+  const origStderrIsTTY = process.stderr.isTTY;
 
   console.log = (...args: unknown[]) => {
     stdoutBuffer += args.map(String).join(" ") + "\n";
@@ -203,6 +204,7 @@ async function run(
     stderrBuffer += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
     return true;
   };
+  (process.stderr as any).isTTY = false;
 
   let exitCode = 0;
   try {
@@ -219,6 +221,7 @@ async function run(
     console.log = origLog;
     console.error = origError;
     (process.stderr as any).write = origStderrWrite;
+    (process.stderr as any).isTTY = origStderrIsTTY;
     for (const [key, val] of Object.entries(savedEnv)) {
       if (val === undefined) {
         delete process.env[key];

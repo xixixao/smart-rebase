@@ -160,6 +160,7 @@ async function run(
     cwd?: string;
     omitStdin?: boolean;
     platform?: NodeJS.Platform;
+    stdoutIsTTY?: boolean;
   } = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const spyOnGetter = jest.spyOn as (obj: NodeJS.Process, key: "platform", accessor: "get") => { mockReturnValue: (v: NodeJS.Platform) => void; mockRestore: () => void };
@@ -195,6 +196,7 @@ async function run(
   const origError = console.error;
   const origStderrWrite = process.stderr.write;
   const origStderrIsTTY = process.stderr.isTTY;
+  const origStdoutIsTTY = process.stdout.isTTY;
 
   console.log = (...args: unknown[]) => {
     stdoutBuffer += args.map(String).join(" ") + "\n";
@@ -207,6 +209,7 @@ async function run(
     return true;
   };
   (process.stderr as NodeJS.WriteStream & { isTTY: unknown }).isTTY = false;
+  (process.stdout as NodeJS.WriteStream & { isTTY: unknown }).isTTY = opts.stdoutIsTTY ?? false;
 
   let exitCode = 0;
   try {
@@ -224,6 +227,7 @@ async function run(
     console.error = origError;
     (process.stderr as NodeJS.WriteStream & { write: unknown }).write = origStderrWrite;
     (process.stderr as NodeJS.WriteStream & { isTTY: unknown }).isTTY = origStderrIsTTY;
+    (process.stdout as NodeJS.WriteStream & { isTTY: unknown }).isTTY = origStdoutIsTTY;
     for (const [key, val] of Object.entries(savedEnv)) {
       if (val === undefined) {
         delete process.env[key];
@@ -233,7 +237,7 @@ async function run(
     }
   }
 
-  return { stdout: stdoutBuffer, stderr: stripAnsi(stderrBuffer), exitCode };
+  return { stdout: stripAnsi(stdoutBuffer), stderr: stripAnsi(stderrBuffer), exitCode };
 }
 
 function makeStdinIterator(input: string): AsyncIterator<string> {
@@ -283,16 +287,29 @@ test("verbose defaults to false", async () => {
   expect(stdout).not.toContain("Verbose mode enabled");
 });
 
+test("uses colors instead of backticks when stdout is a TTY", async () => {
+  const { stdout, exitCode } = await run([], { stdoutIsTTY: true });
+  expect(exitCode).toBe(0);
+  // ANSI codes are stripped here; names appear without backtick delimiters
+  expect(stdout.trim()).toBe(
+    "Rebasing onto branch main.\nRebasing feature onto main. 0 commits have already been merged to main. Will rebase 1 commit."
+  );
+});
+
 test("--verbose flag is recognised", async () => {
   const { stdout, exitCode } = await run(["--verbose"]);
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("Verbose mode enabled");
+  expect(stdout).toBe(
+    "Rebasing onto branch `main`.\nRebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.\n"
+  );
 });
 
 test("-v alias works", async () => {
   const { stdout, exitCode } = await run(["-v"]);
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("Verbose mode enabled");
+  expect(stdout).toBe(
+    "Rebasing onto branch `main`.\nRebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.\n"
+  );
 });
 
 test("unknown flag exits with non-zero code", async () => {
@@ -427,7 +444,8 @@ test("outputs only the rebase summary when there are no merged MRs", async () =>
   const { stdout, exitCode } = await run([]);
   expect(exitCode).toBe(0);
   expect(stdout.trim()).toBe(
-    "Rebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit."
+    "Rebasing onto branch `main`.\n" +
+      "Rebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit."
   );
 });
 
@@ -666,7 +684,7 @@ test("exits with error when cwd is not a git repository", async () => {
   const nonGitDir = mkdtempSync("/tmp/gitlab-rebase-not-git-");
   const { stderr, exitCode } = await run([], { cwd: nonGitDir });
   expect(exitCode).not.toBe(0);
-  expect(stderr).toContain("git repository");
+  expect(stderr.trim()).toBe("Not a Git repository. `gitlab-rebase` must be used inside a Git repo.");
 });
 
 test("exits with error when remote exists but has no URL configured", async () => {
@@ -867,21 +885,22 @@ test("paginates to fetch MRs until updated_at falls before base commit date", as
 
 const REBASE_SUMMARY =
   "Rebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.";
+const DEFAULT_STDOUT = "Rebasing onto branch `main`.\n" + REBASE_SUMMARY;
 // Final-frame ink SelectInput renders (ANSI-stripped). Because ink rewrites its
 // view on each state change and we strip cursor-motion codes from stderr, only
 // the final frame survives: "Update" highlighted if the user pressed Enter
 // directly, "Skip" highlighted if they navigated down first.
 const UPDATE_PROMPT_UPDATE_SELECTED =
-  "`main` is not up-to-date.\n" +
+  "Branch `main` is not up-to-date.\n" +
   "\n" +
-  "❯ 1. Update `main` from `origin`\n" +
+  "❯ 1. Update branch `main` from remote `origin`\n" +
   "  2. Skip\n" +
   "\n" +
   "↑↓ to navigate · Enter to select · Esc to back\n";
 const UPDATE_PROMPT_SKIP_SELECTED =
-  "`main` is not up-to-date.\n" +
+  "Branch `main` is not up-to-date.\n" +
   "\n" +
-  "  1. Update `main` from `origin`\n" +
+  "  1. Update branch `main` from remote `origin`\n" +
   "❯ 2. Skip\n" +
   "\n" +
   "↑↓ to navigate · Enter to select · Esc to back\n";
@@ -908,7 +927,7 @@ test("shows no update prompt when target has no upstream tracking", async () => 
   const { stderr, stdout, exitCode } = await run([]);
   expect(exitCode).toBe(0);
   expect(stderr).toBe("");
-  expect(stdout.trim()).toBe(REBASE_SUMMARY);
+  expect(stdout.trim()).toBe(DEFAULT_STDOUT);
 });
 
 test("shows no update prompt when target is already up to date with remote", async () => {
@@ -924,7 +943,7 @@ test("shows no update prompt when target is already up to date with remote", asy
   const { stderr, stdout, exitCode } = await run([], { cwd: localPath });
   expect(exitCode).toBe(0);
   expect(stderr).toBe("");
-  expect(stdout.trim()).toBe(REBASE_SUMMARY);
+  expect(stdout.trim()).toBe(DEFAULT_STDOUT);
 });
 
 test("shows update prompt when target branch is behind remote", async () => {
@@ -932,7 +951,7 @@ test("shows update prompt when target branch is behind remote", async () => {
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
   expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED);
-  expect(stdout.trim()).toBe(REBASE_SUMMARY);
+  expect(stdout.trim()).toBe(DEFAULT_STDOUT);
 });
 
 test("updates target branch when user selects Update", async () => {
@@ -940,7 +959,7 @@ test("updates target branch when user selects Update", async () => {
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
   expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED);
-  expect(stdout.trim()).toBe(REBASE_SUMMARY);
+  expect(stdout.trim()).toBe(DEFAULT_STDOUT);
   const localMainSha = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainSha).toBe(remoteNewSha);
 });
@@ -951,7 +970,7 @@ test("skips update when user selects Skip", async () => {
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_DOWN + KEY_ENTER });
   expect(exitCode).toBe(0);
   expect(stderr).toBe(UPDATE_PROMPT_SKIP_SELECTED);
-  expect(stdout.trim()).toBe(REBASE_SUMMARY);
+  expect(stdout.trim()).toBe(DEFAULT_STDOUT);
   const localMainShaAfter = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainShaAfter).toBe(localMainShaBefore);
   expect(localMainShaAfter).not.toBe(remoteNewSha);
@@ -966,7 +985,7 @@ test("exits with error when target update fails due to diverged branches", async
   expect(exitCode).not.toBe(0);
   expect(stderr).toBe(
     UPDATE_PROMPT_UPDATE_SELECTED +
-      "Failed to update `main` from `origin`: non-fast-forward\n"
+      "Cannot update branch `main`: it has diverged from branch `origin/main`.\n"
   );
-  expect(stdout).toBe("");
+  expect(stdout).toBe("Rebasing onto branch `main`.\n");
 });

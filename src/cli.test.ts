@@ -27,11 +27,11 @@ const mockGitLab = Bun.serve({
     const pathname = url.pathname;
 
     const projectMatch = pathname.match(/\/api\/v4\/projects\/([^/]+)/);
-    if (projectMatch) lastRequestedProject = decodeURIComponent(projectMatch[1]);
+    if (projectMatch) lastRequestedProject = decodeURIComponent(projectMatch[1]!);
 
     const commitsMatch = pathname.match(/\/merge_requests\/(\d+)\/commits$/);
     if (commitsMatch) {
-      const iid = parseInt(commitsMatch[1]);
+      const iid = parseInt(commitsMatch[1]!);
       if (mockCommitsErrorIid !== null && iid === mockCommitsErrorIid) {
         return new Response("Internal Server Error", { status: 500 });
       }
@@ -162,7 +162,9 @@ async function run(
     platform?: NodeJS.Platform;
   } = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const platformSpy = jest.spyOn(process, "platform", "get").mockReturnValue(opts.platform ?? "linux");
+  const spyOnGetter = jest.spyOn as (obj: NodeJS.Process, key: "platform", accessor: "get") => { mockReturnValue: (v: NodeJS.Platform) => void; mockRestore: () => void };
+  const platformSpy = spyOnGetter(process, "platform", "get");
+  platformSpy.mockReturnValue(opts.platform ?? "linux");
 
   const testEnv: Record<string, string | undefined> = {
     GITLAB_USERNAME: "testuser",
@@ -211,7 +213,7 @@ async function run(
     await main(args, {
       cwd: opts.cwd ?? defaultTestCwd,
       ...(opts.omitStdin ? {} : { stdinLines }),
-      stdin: inkStream,
+      stdin: inkStream as unknown as NodeJS.ReadableStream,
     });
   } catch (e: unknown) {
     exitCode = 1;
@@ -240,7 +242,7 @@ function makeStdinIterator(input: string): AsyncIterator<string> {
   let i = 0;
   return {
     async next() {
-      if (i < lines.length) return { value: lines[i++], done: false as const };
+      if (i < lines.length) return { value: lines[i++]!, done: false as const };
       return { value: "" as string, done: true as const };
     },
   };

@@ -58,7 +58,7 @@ export async function fetchMergedMRsSince(opts: {
     if (
       mrs.length === 0 ||
       mrs.length < perPage ||
-      new Date(mrs[mrs.length - 1].updated_at) < sinceDate
+      new Date(mrs.at(-1)!.updated_at) < sinceDate
     ) break;
     page++;
   }

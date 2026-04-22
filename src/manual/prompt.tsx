@@ -29,7 +29,7 @@ export async function selectPrompt(
 
     const { unmount } = render(<App />, {
       stdout: process.stderr as NodeJS.WriteStream,
-      stdin,
+      stdin: stdin as NodeJS.ReadStream,
     });
   });
 }

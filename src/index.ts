@@ -1,4 +1,4 @@
-import { createCli } from "./cli";
+import { createCli, type Argv } from "./cli";
 import { getAuth } from "./auth";
 import { fetchMergedMRsSince, type MRWithCommits } from "./gitlab";
 import { readCache, writeCache } from "./storage";
@@ -9,7 +9,7 @@ export async function main(
   opts: { cwd?: string; stdinLines?: AsyncIterator<string>; stdin?: NodeJS.ReadableStream } = {}
 ): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
-  const argv = await createCli(args).parseAsync();
+  const argv = await createCli(args).parseAsync() as Argv;
 
   await ensureGitRepo(cwd);
 
@@ -154,7 +154,7 @@ async function getProjectId(cwd: string): Promise<string> {
   const remoteUrl = await resolveGitLabRemoteUrl(cwd);
   if (remoteUrl !== null) {
     const match = remoteUrl.match(/gitlab\.com[:/](.+?)(?:\.git)?$/);
-    if (match) return match[1];
+    if (match) return match[1]!;
   }
   throw new Error(
     "Cannot determine GitLab project. Set GITLAB_PROJECT or configure a GitLab remote."
@@ -209,7 +209,7 @@ async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {
   if (remotes.includes("origin")) {
     remoteName = "origin";
   } else if (remotes.length === 1) {
-    remoteName = remotes[0];
+    remoteName = remotes[0]!;
   } else {
     return null;
   }

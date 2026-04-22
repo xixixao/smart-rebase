@@ -190,10 +190,14 @@ async function run(
   let stdoutBuffer = "";
   let stderrBuffer = "";
   const origLog = console.log;
+  const origError = console.error;
   const origStderrWrite = process.stderr.write;
 
   console.log = (...args: unknown[]) => {
     stdoutBuffer += args.map(String).join(" ") + "\n";
+  };
+  console.error = (...args: unknown[]) => {
+    stderrBuffer += args.map(String).join(" ") + "\n";
   };
   (process.stderr as any).write = (chunk: string | Uint8Array) => {
     stderrBuffer += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
@@ -213,6 +217,7 @@ async function run(
   } finally {
     platformSpy.mockRestore();
     console.log = origLog;
+    console.error = origError;
     (process.stderr as any).write = origStderrWrite;
     for (const [key, val] of Object.entries(savedEnv)) {
       if (val === undefined) {

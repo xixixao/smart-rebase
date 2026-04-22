@@ -1,6 +1,6 @@
 {
   "name": "gitlab-rebase",
-  "module": "index.ts",
+  "module": "src/index.ts",
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^25.6.0",
@@ -11,11 +11,11 @@
     "typescript": "^5"
   },
   "bin": {
-    "gitlab-rebase": "./manual/entry.ts"
+    "gitlab-rebase": "./src/manual/entry.ts"
   },
   "private": true,
   "scripts": {
-    "start": "bun run manual/entry.ts",
+    "start": "bun run src/manual/entry.ts",
     "test": "bun test",
     "test:coverage": "bun test --coverage"
   },

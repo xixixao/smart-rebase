@@ -110,12 +110,16 @@ async function checkAndUpdateTargetBranch(
     return;
   }
 
+  const remoteName = upstream.split("/")[0];
+  const remoteBranch = upstream.split("/").slice(1).join("/");
+
+  // Fetch to get the real current state of the remote branch.
+  await Bun.$`git fetch ${remoteName} ${remoteBranch}`.cwd(cwd).quiet();
+
   const behind = (
     await Bun.$`git rev-list ${target}..${upstream}`.cwd(cwd).quiet().text()
   ).trim();
   if (!behind) return;
-
-  const remoteName = upstream.split("/")[0];
 
   process.stderr.write(`\`${target}\` is not up-to-date.\n`);
   process.stderr.write(`   > 1. Update \`${target}\` from \`${remoteName}\`\n`);
@@ -126,14 +130,18 @@ async function checkAndUpdateTargetBranch(
   const choice = (line ?? "").trim();
 
   if (choice !== "2") {
-    try {
-      await Bun.$`git fetch ${remoteName} ${target}:${target}`.cwd(cwd).quiet();
-    } catch (e) {
+    // Fast-forward the local branch to the already-fetched tracking ref.
+    // merge-base --is-ancestor exits non-zero when local has diverged.
+    const ff = await Bun.$`git merge-base --is-ancestor ${target} ${upstream}`
+      .cwd(cwd)
+      .quiet()
+      .nothrow();
+    if (ff.exitCode !== 0) {
       throw new Error(
-        `Failed to update \`${target}\` from \`${remoteName}\`: ` +
-          (e instanceof Error ? e.message : String(e))
+        `Failed to update \`${target}\` from \`${remoteName}\`: non-fast-forward`
       );
     }
+    await Bun.$`git branch -f ${target} ${upstream}`.cwd(cwd).quiet();
   }
 }
 

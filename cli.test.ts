@@ -779,9 +779,9 @@ async function makeRepoWithRemoteAhead(): Promise<{
   await Bun.$`git config commit.gpgsign false`.cwd(localPath).quiet();
   await Bun.$`git checkout -b feature`.cwd(localPath).quiet();
   await Bun.$`git commit --allow-empty -m "feature work"`.cwd(localPath).quiet();
+  // Push a new commit to the remote *after* cloning — local has no knowledge of it yet.
   await Bun.$`git commit --allow-empty -m "new remote commit"`.cwd(remotePath).quiet();
   const remoteNewSha = (await Bun.$`git rev-parse HEAD`.cwd(remotePath).text()).trim();
-  await Bun.$`git fetch origin`.cwd(localPath).quiet();
   return { repoPath: localPath, remoteNewSha };
 }
 
@@ -846,5 +846,5 @@ test("exits with error when target update fails due to diverged branches", async
   await Bun.$`git checkout feature`.cwd(repoPath).quiet();
   const { stderr, exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
   expect(exitCode).not.toBe(0);
-  expect(stderr).toContain("Failed to update `main` from `origin`");
+  expect(stderr).toContain("Failed to update `main` from `origin`: non-fast-forward");
 });

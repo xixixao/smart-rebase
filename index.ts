@@ -1,5 +1,5 @@
 import { createCli } from "./cli";
-import { getAuth } from "./auth";
+import { getAuth, getDefaultStdinLines } from "./auth";
 import { fetchMergedMRsSince, type MRWithCommits } from "./gitlab";
 import { readCache, writeCache } from "./storage";
 
@@ -22,6 +22,8 @@ export async function main(
     const headSha = await Bun.$`git rev-parse --short HEAD`.cwd(cwd).text();
     console.log(headSha.trim());
   }
+
+  await checkAndUpdateTargetBranch(cwd, target, opts.stdinLines);
 
   const auth = await getAuth(opts.stdinLines);
 
@@ -90,6 +92,47 @@ export async function main(
     console.log(`!${mr.iid} ${mr.title}`);
     for (const commit of commits) {
       console.log(`  ${commit.short_id} ${commit.title}`);
+    }
+  }
+}
+
+async function checkAndUpdateTargetBranch(
+  cwd: string,
+  target: string,
+  stdinLines?: AsyncIterator<string>
+): Promise<void> {
+  let upstream: string;
+  try {
+    upstream = (
+      await Bun.$`git rev-parse --abbrev-ref ${target}@{u}`.cwd(cwd).quiet().text()
+    ).trim();
+  } catch {
+    return;
+  }
+
+  const behind = (
+    await Bun.$`git rev-list ${target}..${upstream}`.cwd(cwd).quiet().text()
+  ).trim();
+  if (!behind) return;
+
+  const remoteName = upstream.split("/")[0];
+
+  process.stderr.write(`\`${target}\` is not up-to-date.\n`);
+  process.stderr.write(`   > 1. Update \`${target}\` from \`${remoteName}\`\n`);
+  process.stderr.write(`       2. Skip\n`);
+
+  const lines = stdinLines ?? getDefaultStdinLines();
+  const { value: line } = await lines.next();
+  const choice = (line ?? "").trim();
+
+  if (choice !== "2") {
+    try {
+      await Bun.$`git fetch ${remoteName} ${target}:${target}`.cwd(cwd).quiet();
+    } catch (e) {
+      throw new Error(
+        `Failed to update \`${target}\` from \`${remoteName}\`: ` +
+          (e instanceof Error ? e.message : String(e))
+      );
     }
   }
 }

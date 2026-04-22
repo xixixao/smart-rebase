@@ -764,3 +764,87 @@ test("paginates to fetch MRs until updated_at falls before base commit date", as
   expect(stdout).toContain("!2 Recent MR");
   expect(stdout).not.toContain("!1 Old MR");
 });
+
+// --- target branch update tests ---
+
+async function makeRepoWithRemoteAhead(): Promise<{
+  repoPath: string;
+  remoteNewSha: string;
+}> {
+  const remotePath = await makeGitRepo();
+  const localPath = mkdtempSync("/tmp/gitlab-rebase-test-");
+  await Bun.$`git clone ${remotePath} ${localPath}`.quiet();
+  await Bun.$`git config user.email "test@example.com"`.cwd(localPath).quiet();
+  await Bun.$`git config user.name "Test User"`.cwd(localPath).quiet();
+  await Bun.$`git config commit.gpgsign false`.cwd(localPath).quiet();
+  await Bun.$`git checkout -b feature`.cwd(localPath).quiet();
+  await Bun.$`git commit --allow-empty -m "feature work"`.cwd(localPath).quiet();
+  await Bun.$`git commit --allow-empty -m "new remote commit"`.cwd(remotePath).quiet();
+  const remoteNewSha = (await Bun.$`git rev-parse HEAD`.cwd(remotePath).text()).trim();
+  await Bun.$`git fetch origin`.cwd(localPath).quiet();
+  return { repoPath: localPath, remoteNewSha };
+}
+
+test("shows no update prompt when target has no upstream tracking", async () => {
+  const { stderr } = await run([]);
+  expect(stderr).not.toContain("not up-to-date");
+});
+
+test("shows no update prompt when target is already up to date with remote", async () => {
+  const remotePath = await makeGitRepo();
+  const localPath = mkdtempSync("/tmp/gitlab-rebase-test-");
+  await Bun.$`git clone ${remotePath} ${localPath}`.quiet();
+  await Bun.$`git config user.email "test@example.com"`.cwd(localPath).quiet();
+  await Bun.$`git config user.name "Test User"`.cwd(localPath).quiet();
+  await Bun.$`git config commit.gpgsign false`.cwd(localPath).quiet();
+  await Bun.$`git checkout -b feature`.cwd(localPath).quiet();
+  await Bun.$`git commit --allow-empty -m "feature work"`.cwd(localPath).quiet();
+
+  const { stderr } = await run([], { cwd: localPath });
+  expect(stderr).not.toContain("not up-to-date");
+});
+
+test("shows update prompt when target branch is behind remote", async () => {
+  const { repoPath } = await makeRepoWithRemoteAhead();
+  const { stderr, exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
+  expect(exitCode).toBe(0);
+  expect(stderr).toContain("`main` is not up-to-date.");
+  expect(stderr).toContain("Update `main` from `origin`");
+  expect(stderr).toContain("2. Skip");
+});
+
+test("updates target branch when user selects option 1", async () => {
+  const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
+  const { exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
+  expect(exitCode).toBe(0);
+  const localMainSha = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
+  expect(localMainSha).toBe(remoteNewSha);
+});
+
+test("updates target branch by default when user presses Enter", async () => {
+  const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
+  const { exitCode } = await run([], { cwd: repoPath, stdin: "\n" });
+  expect(exitCode).toBe(0);
+  const localMainSha = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
+  expect(localMainSha).toBe(remoteNewSha);
+});
+
+test("skips update when user selects option 2", async () => {
+  const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
+  const localMainShaBefore = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
+  const { exitCode } = await run([], { cwd: repoPath, stdin: "2\n" });
+  expect(exitCode).toBe(0);
+  const localMainShaAfter = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
+  expect(localMainShaAfter).toBe(localMainShaBefore);
+  expect(localMainShaAfter).not.toBe(remoteNewSha);
+});
+
+test("exits with error when target update fails due to diverged branches", async () => {
+  const { repoPath } = await makeRepoWithRemoteAhead();
+  await Bun.$`git checkout main`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "local only commit"`.cwd(repoPath).quiet();
+  await Bun.$`git checkout feature`.cwd(repoPath).quiet();
+  const { stderr, exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("Failed to update `main` from `origin`");
+});

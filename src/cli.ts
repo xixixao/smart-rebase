@@ -9,7 +9,6 @@ export function createCli(argv = hideBin(process.argv)) {
       yargs.positional("target", {
         type: "string",
         description: "Target branch to rebase onto",
-        default: "main",
       })
     )
     .version("0.1.0")

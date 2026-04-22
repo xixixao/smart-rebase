@@ -14,9 +14,9 @@ export async function main(
   await ensureGitRepo(cwd);
 
   const target = argv.target ?? "main";
-
-  if (argv.verbose) {
-    console.log("Verbose mode enabled");
+  
+  if (!argv.target) {
+    console.log("Rebasing onto branch `main`.")
   }
 
   if (argv.sha) {
@@ -123,9 +123,9 @@ async function checkAndUpdateTargetBranch(
   if (!behind) return;
 
   const choice = await selectPrompt(
-    `\`${target}\` is not up-to-date.`,
+    `Branch \`${target}\` is not up-to-date.`,
     [
-      { label: `Update \`${target}\` from \`${remoteName}\``, value: "update" },
+      { label: `Update branch \`${target}\` from remote \`${remoteName}\``, value: "update" },
       { label: "Skip", value: "skip" },
     ],
     stdin
@@ -140,7 +140,7 @@ async function checkAndUpdateTargetBranch(
       .nothrow();
     if (ff.exitCode !== 0) {
       throw new Error(
-        `Failed to update \`${target}\` from \`${remoteName}\`: non-fast-forward`
+        `Cannot update branch \`${target}\`: it has diverged from branch \`${upstream}\`.`
       );
     }
     await Bun.$`git branch -f ${target} ${upstream}`.cwd(cwd).quiet();
@@ -165,7 +165,7 @@ async function ensureGitRepo(cwd: string): Promise<void> {
   try {
     await Bun.$`git rev-parse --git-dir`.cwd(cwd).quiet();
   } catch {
-    throw new Error("Not a git repository. gitlab-rebase must be run inside a git repo.");
+    throw new Error("Not a Git repository. `gitlab-rebase` must be used inside a Git repo.");
   }
 }
 

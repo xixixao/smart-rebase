@@ -200,11 +200,11 @@ async function run(
   console.error = (...args: unknown[]) => {
     stderrBuffer += args.map(String).join(" ") + "\n";
   };
-  (process.stderr as any).write = (chunk: string | Uint8Array) => {
+  (process.stderr as NodeJS.WriteStream & { write: unknown }).write = (chunk: string | Uint8Array) => {
     stderrBuffer += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
     return true;
   };
-  (process.stderr as any).isTTY = false;
+  (process.stderr as NodeJS.WriteStream & { isTTY: unknown }).isTTY = false;
 
   let exitCode = 0;
   try {
@@ -220,8 +220,8 @@ async function run(
     platformSpy.mockRestore();
     console.log = origLog;
     console.error = origError;
-    (process.stderr as any).write = origStderrWrite;
-    (process.stderr as any).isTTY = origStderrIsTTY;
+    (process.stderr as NodeJS.WriteStream & { write: unknown }).write = origStderrWrite;
+    (process.stderr as NodeJS.WriteStream & { isTTY: unknown }).isTTY = origStderrIsTTY;
     for (const [key, val] of Object.entries(savedEnv)) {
       if (val === undefined) {
         delete process.env[key];

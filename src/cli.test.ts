@@ -159,8 +159,11 @@ async function run(
     inkStdin?: string;
     cwd?: string;
     omitStdin?: boolean;
+    platform?: NodeJS.Platform;
   } = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const platformSpy = jest.spyOn(process, "platform", "get").mockReturnValue(opts.platform ?? "linux");
+
   const testEnv: Record<string, string | undefined> = {
     GITLAB_USERNAME: "testuser",
     GITLAB_TOKEN: "testtoken",
@@ -208,6 +211,7 @@ async function run(
     exitCode = 1;
     stderrBuffer += (e instanceof Error ? e.message : String(e)) + "\n";
   } finally {
+    platformSpy.mockRestore();
     console.log = origLog;
     (process.stderr as any).write = origStderrWrite;
     for (const [key, val] of Object.entries(savedEnv)) {
@@ -532,32 +536,35 @@ test("loads credentials from settings file when env vars are not set", async () 
 
 test("saves credentials to macOS Library path when on darwin", async () => {
   const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
-  const spy = jest.spyOn(process, "platform", "get").mockReturnValue("darwin" as NodeJS.Platform);
-  try {
-    const { exitCode } = await run([], {
-      env: { GITLAB_USERNAME: undefined, GITLAB_TOKEN: undefined, HOME: tmpHome, XDG_CONFIG_HOME: undefined },
-      stdin: "myuser\nmytoken\n",
-    });
-    expect(exitCode).toBe(0);
-    expect(existsSync(join(tmpHome, "Library", "Application Support", "gitlab-rebase", "credentials.json"))).toBe(true);
-  } finally {
-    spy.mockRestore();
-  }
+  const { exitCode } = await run([], {
+    platform: "darwin",
+    env: { GITLAB_USERNAME: undefined, GITLAB_TOKEN: undefined, HOME: tmpHome, XDG_CONFIG_HOME: undefined },
+    stdin: "myuser\nmytoken\n",
+  });
+  expect(exitCode).toBe(0);
+  expect(existsSync(join(tmpHome, "Library", "Application Support", "gitlab-rebase", "credentials.json"))).toBe(true);
 });
 
 test("saves credentials to APPDATA path when on win32", async () => {
   const tmpAppData = mkdtempSync("/tmp/gitlab-rebase-test-appdata-");
-  const spy = jest.spyOn(process, "platform", "get").mockReturnValue("win32" as NodeJS.Platform);
-  try {
-    const { exitCode } = await run([], {
-      env: { GITLAB_USERNAME: undefined, GITLAB_TOKEN: undefined, APPDATA: tmpAppData, XDG_CONFIG_HOME: undefined },
-      stdin: "myuser\nmytoken\n",
-    });
-    expect(exitCode).toBe(0);
-    expect(existsSync(join(tmpAppData, "gitlab-rebase", "credentials.json"))).toBe(true);
-  } finally {
-    spy.mockRestore();
-  }
+  const { exitCode } = await run([], {
+    platform: "win32",
+    env: { GITLAB_USERNAME: undefined, GITLAB_TOKEN: undefined, APPDATA: tmpAppData, XDG_CONFIG_HOME: undefined },
+    stdin: "myuser\nmytoken\n",
+  });
+  expect(exitCode).toBe(0);
+  expect(existsSync(join(tmpAppData, "gitlab-rebase", "credentials.json"))).toBe(true);
+});
+
+test("saves credentials to XDG_CONFIG_HOME path when on linux", async () => {
+  const tmpXdg = mkdtempSync("/tmp/gitlab-rebase-test-xdg-");
+  const { exitCode } = await run([], {
+    platform: "linux",
+    env: { GITLAB_USERNAME: undefined, GITLAB_TOKEN: undefined, XDG_CONFIG_HOME: tmpXdg },
+    stdin: "myuser\nmytoken\n",
+  });
+  expect(exitCode).toBe(0);
+  expect(existsSync(join(tmpXdg, "gitlab-rebase", "credentials.json"))).toBe(true);
 });
 
 test("env vars take precedence over saved credentials", async () => {

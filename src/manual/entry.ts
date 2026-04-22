@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 /* c8 ignore start */
 import { main } from "../index";
 

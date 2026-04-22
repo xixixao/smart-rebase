@@ -1,5 +1,6 @@
 import { test, expect, afterAll, beforeAll, beforeEach, jest } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
 import { join, dirname } from "node:path";
 import { main } from "./index";
 import { GITLAB_TOKEN_URL } from "./auth";
@@ -76,11 +77,86 @@ beforeEach(() => {
 
 const GITLAB_URL = `http://localhost:${mockGitLab.port}`;
 
+// KEY_ENTER / KEY_DOWN are raw terminal key codes used to drive the ink SelectInput prompt.
+const KEY_ENTER = "\r";
+const KEY_DOWN = "\x1B[B";
+
+function parseKeySequences(keys: string): string[] {
+  const result: string[] = [];
+  let i = 0;
+  while (i < keys.length) {
+    if (keys.slice(i, i + 3) === "\x1B[A" || keys.slice(i, i + 3) === "\x1B[B" ||
+        keys.slice(i, i + 3) === "\x1B[C" || keys.slice(i, i + 3) === "\x1B[D") {
+      result.push(keys.slice(i, i + 3));
+      i += 3;
+    } else {
+      result.push(keys[i]!);
+      i++;
+    }
+  }
+  return result;
+}
+
+// Modelled after ink-testing-library's Stdin (https://github.com/vadimdemedes/ink/blob/master/src/testing-library.ts):
+// a plain EventEmitter that stores the latest chunk in `.data`, emits
+// `readable`/`data` on write, and returns the chunk from `.read()`.
+// Ink 7's input handler expects exactly this shape.
+//
+// We queue the key sequences and dispatch them from setRawMode(true), which
+// ink calls right after it wires up its readable listener — this is our signal
+// that ink is ready for input. Each key is written on its own tick so React
+// can flush the state update from the previous key before the next arrives.
+class TestStdin extends EventEmitter {
+  isTTY = true;
+  data: Buffer | string | null = null;
+  private queued: string[] = [];
+  enqueue(sequences: string[]): void {
+    this.queued = sequences;
+  }
+  setRawMode = (mode: boolean): void => {
+    if (!mode || this.queued.length === 0) return;
+    const seqs = this.queued;
+    this.queued = [];
+    const send = (i: number): void => {
+      if (i >= seqs.length) return;
+      this.write(Buffer.from(seqs[i]!));
+      setImmediate(() => send(i + 1));
+    };
+    setImmediate(() => send(0));
+  };
+  write = (data: Buffer | string): void => {
+    this.data = data;
+    this.emit("readable");
+    this.emit("data", data);
+  };
+  setEncoding = (): void => {};
+  resume = (): void => {};
+  pause = (): void => {};
+  ref = (): void => {};
+  unref = (): void => {};
+  read = (): Buffer | string | null => {
+    const { data } = this;
+    this.data = null;
+    return data;
+  };
+}
+
+function makeInkStdinStream(keys: string): TestStdin {
+  const stdin = new TestStdin();
+  stdin.enqueue(parseKeySequences(keys));
+  return stdin;
+}
+
+function stripAnsi(str: string): string {
+  return str.replace(/\x1B\[[0-9;?]*[mGKHFJABCDEFGST]/g, "").replace(/\x1B[>=]/g, "");
+}
+
 async function run(
   args: string[],
   opts: {
     env?: Record<string, string | undefined>;
     stdin?: string;
+    inkStdin?: string;
     cwd?: string;
     omitStdin?: boolean;
   } = {}
@@ -106,6 +182,7 @@ async function run(
   }
 
   const stdinLines = makeStdinIterator(opts.stdin ?? "");
+  const inkStream = makeInkStdinStream(opts.inkStdin ?? "");
 
   let stdoutBuffer = "";
   let stderrBuffer = "";
@@ -122,7 +199,11 @@ async function run(
 
   let exitCode = 0;
   try {
-    await main(args, { cwd: opts.cwd ?? defaultTestCwd, ...(opts.omitStdin ? {} : { stdinLines }) });
+    await main(args, {
+      cwd: opts.cwd ?? defaultTestCwd,
+      ...(opts.omitStdin ? {} : { stdinLines }),
+      stdin: inkStream,
+    });
   } catch (e: unknown) {
     exitCode = 1;
     stderrBuffer += (e instanceof Error ? e.message : String(e)) + "\n";
@@ -138,7 +219,7 @@ async function run(
     }
   }
 
-  return { stdout: stdoutBuffer, stderr: stderrBuffer, exitCode };
+  return { stdout: stdoutBuffer, stderr: stripAnsi(stderrBuffer), exitCode };
 }
 
 function makeStdinIterator(input: string): AsyncIterator<string> {
@@ -769,10 +850,18 @@ test("paginates to fetch MRs until updated_at falls before base commit date", as
 
 const REBASE_SUMMARY =
   "Rebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.";
-const UPDATE_PROMPT =
+// Final-frame ink SelectInput renders (ANSI-stripped). Because ink rewrites its
+// view on each state change and we strip cursor-motion codes from stderr, only
+// the final frame survives: "Update" highlighted if the user pressed Enter
+// directly, "Skip" highlighted if they navigated down first.
+const UPDATE_PROMPT_UPDATE_SELECTED =
   "`main` is not up-to-date.\n" +
-  "   > 1. Update `main` from `origin`\n" +
-  "       2. Skip\n";
+  "❯ Update `main` from `origin`\n" +
+  "  Skip\n";
+const UPDATE_PROMPT_SKIP_SELECTED =
+  "`main` is not up-to-date.\n" +
+  "  Update `main` from `origin`\n" +
+  "❯ Skip\n";
 
 async function makeRepoWithRemoteAhead(): Promise<{
   repoPath: string;
@@ -817,38 +906,28 @@ test("shows no update prompt when target is already up to date with remote", asy
 
 test("shows update prompt when target branch is behind remote", async () => {
   const { repoPath } = await makeRepoWithRemoteAhead();
-  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT);
+  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED);
   expect(stdout.trim()).toBe(REBASE_SUMMARY);
 });
 
-test("updates target branch when user selects option 1", async () => {
+test("updates target branch when user selects Update", async () => {
   const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
-  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT);
+  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED);
   expect(stdout.trim()).toBe(REBASE_SUMMARY);
   const localMainSha = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainSha).toBe(remoteNewSha);
 });
 
-test("updates target branch by default when user presses Enter", async () => {
-  const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
-  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, stdin: "\n" });
-  expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT);
-  expect(stdout.trim()).toBe(REBASE_SUMMARY);
-  const localMainSha = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
-  expect(localMainSha).toBe(remoteNewSha);
-});
-
-test("skips update when user selects option 2", async () => {
+test("skips update when user selects Skip", async () => {
   const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
   const localMainShaBefore = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
-  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, stdin: "2\n" });
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_DOWN + KEY_ENTER });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT);
+  expect(stderr).toBe(UPDATE_PROMPT_SKIP_SELECTED);
   expect(stdout.trim()).toBe(REBASE_SUMMARY);
   const localMainShaAfter = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainShaAfter).toBe(localMainShaBefore);
@@ -860,10 +939,11 @@ test("exits with error when target update fails due to diverged branches", async
   await Bun.$`git checkout main`.cwd(repoPath).quiet();
   await Bun.$`git commit --allow-empty -m "local only commit"`.cwd(repoPath).quiet();
   await Bun.$`git checkout feature`.cwd(repoPath).quiet();
-  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, stdin: "1\n" });
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).not.toBe(0);
   expect(stderr).toBe(
-    UPDATE_PROMPT + "Failed to update `main` from `origin`: non-fast-forward\n"
+    UPDATE_PROMPT_UPDATE_SELECTED +
+      "Failed to update `main` from `origin`: non-fast-forward\n"
   );
   expect(stdout).toBe("");
 });

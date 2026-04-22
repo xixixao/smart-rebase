@@ -3,6 +3,7 @@ import { getAuth } from "./auth";
 import { fetchMergedMRsSince, type MRWithCommits } from "./gitlab";
 import { readCache, writeCache } from "./storage";
 import { selectPrompt } from "./manual/prompt";
+import { q } from "./format";
 
 export async function main(
   args: string[],
@@ -16,7 +17,7 @@ export async function main(
   const target = argv.target ?? "main";
   
   if (!argv.target) {
-    console.log("Rebasing onto branch `main`.")
+    console.log(`Rebasing onto branch ${q("main")}.`);
   }
 
   if (argv.sha) {
@@ -65,7 +66,7 @@ export async function main(
 
   if (currentBranchShas.length === 0) {
     throw new Error(
-      `No commits on branch \`${currentBranch}\` ahead of \`${target}\`.`
+      `No commits on branch ${q(currentBranch)} ahead of ${q(target)}.`
     );
   }
 
@@ -79,14 +80,14 @@ export async function main(
   if (willRebaseCount === 0) {
     const n = alreadyMergedCount;
     throw new Error(
-      `The ${n} ${n === 1 ? "commit" : "commits"} on branch \`${currentBranch}\` ${n === 1 ? "has" : "have"} already been merged to \`${target}\`.`
+      `The ${n} ${n === 1 ? "commit" : "commits"} on branch ${q(currentBranch)} ${n === 1 ? "has" : "have"} already been merged to ${q(target)}.`
     );
   }
 
   const mergedStr = `${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit" : "commits"}`;
   const willRebaseStr = `${willRebaseCount} ${willRebaseCount === 1 ? "commit" : "commits"}`;
   console.log(
-    `Rebasing \`${currentBranch}\` onto \`${target}\`. ${mergedStr} ${alreadyMergedCount === 1 ? "has" : "have"} already been merged to \`${target}\`. Will rebase ${willRebaseStr}.`
+    `Rebasing ${q(currentBranch)} onto ${q(target)}. ${mergedStr} ${alreadyMergedCount === 1 ? "has" : "have"} already been merged to ${q(target)}. Will rebase ${willRebaseStr}.`
   );
 
   for (const { mr, commits } of mrsWithCommits) {
@@ -123,9 +124,9 @@ async function checkAndUpdateTargetBranch(
   if (!behind) return;
 
   const choice = await selectPrompt(
-    `Branch \`${target}\` is not up-to-date.`,
+    `Branch ${q(target)} is not up-to-date.`,
     [
-      { label: `Update branch \`${target}\` from remote \`${remoteName}\``, value: "update" },
+      { label: `Update branch ${q(target)} from remote ${q(remoteName)}`, value: "update" },
       { label: "Skip", value: "skip" },
     ],
     stdin
@@ -140,7 +141,7 @@ async function checkAndUpdateTargetBranch(
       .nothrow();
     if (ff.exitCode !== 0) {
       throw new Error(
-        `Cannot update branch \`${target}\`: it has diverged from branch \`${upstream}\`.`
+        `Cannot update branch ${q(target)}: it has diverged from branch ${q(upstream)}.`
       );
     }
     await Bun.$`git branch -f ${target} ${upstream}`.cwd(cwd).quiet();
@@ -165,7 +166,7 @@ async function ensureGitRepo(cwd: string): Promise<void> {
   try {
     await Bun.$`git rev-parse --git-dir`.cwd(cwd).quiet();
   } catch {
-    throw new Error("Not a Git repository. `gitlab-rebase` must be used inside a Git repo.");
+    throw new Error(`Not a Git repository. ${q("gitlab-rebase")} must be used inside a Git repo.`);
   }
 }
 
@@ -174,7 +175,7 @@ async function getBaseSha(cwd: string, target: string): Promise<string> {
     return (await Bun.$`git merge-base HEAD ${target}`.cwd(cwd).quiet().text()).trim();
   } catch {
     throw new Error(
-      `Cannot find merge base with branch "${target}". Make sure the branch exists and has commits in common with HEAD.`
+      `Cannot find merge base with branch ${q(target)}. Make sure the branch exists and has commits in common with HEAD.`
     );
   }
 }

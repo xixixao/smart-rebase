@@ -13,7 +13,7 @@ export interface GitLabAuth {
 
 let _defaultStdinLines: AsyncIterator<string> | undefined;
 
-function getDefaultStdinLines(): AsyncIterator<string> {
+export function getDefaultStdinLines(): AsyncIterator<string> {
   if (!_defaultStdinLines) {
     const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: false });
     _defaultStdinLines = rl[Symbol.asyncIterator]();

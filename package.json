@@ -4,6 +4,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
     "@types/yargs": "^17.0.35"
   },
   "peerDependencies": {
@@ -21,6 +22,9 @@
   "type": "module",
   "dependencies": {
     "arktype": "^2.2.0",
+    "ink": "^7.0.1",
+    "ink-select-input": "^6.2.0",
+    "react": "^19.2.5",
     "yargs": "^18.0.0"
   }
 }

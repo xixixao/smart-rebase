@@ -2,10 +2,11 @@ import { createCli } from "./cli";
 import { getAuth } from "./auth";
 import { fetchMergedMRsSince, type MRWithCommits } from "./gitlab";
 import { readCache, writeCache } from "./storage";
+import { selectPrompt } from "./manual/prompt";
 
 export async function main(
   args: string[],
-  opts: { cwd?: string; stdinLines?: AsyncIterator<string> } = {}
+  opts: { cwd?: string; stdinLines?: AsyncIterator<string>; stdin?: NodeJS.ReadableStream } = {}
 ): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const argv = await createCli(args).parseAsync();
@@ -22,6 +23,8 @@ export async function main(
     const headSha = await Bun.$`git rev-parse --short HEAD`.cwd(cwd).text();
     console.log(headSha.trim());
   }
+
+  await checkAndUpdateTargetBranch(cwd, target, opts.stdin);
 
   const auth = await getAuth(opts.stdinLines);
 
@@ -91,6 +94,56 @@ export async function main(
     for (const commit of commits) {
       console.log(`  ${commit.short_id} ${commit.title}`);
     }
+  }
+}
+
+async function checkAndUpdateTargetBranch(
+  cwd: string,
+  target: string,
+  stdin?: NodeJS.ReadableStream
+): Promise<void> {
+  let upstream: string;
+  try {
+    upstream = (
+      await Bun.$`git rev-parse --abbrev-ref ${target}@{u}`.cwd(cwd).quiet().text()
+    ).trim();
+  } catch {
+    return;
+  }
+
+  const remoteName = upstream.split("/")[0];
+  const remoteBranch = upstream.split("/").slice(1).join("/");
+
+  // Fetch to get the real current state of the remote branch.
+  await Bun.$`git fetch ${remoteName} ${remoteBranch}`.cwd(cwd).quiet();
+
+  const behind = (
+    await Bun.$`git rev-list ${target}..${upstream}`.cwd(cwd).quiet().text()
+  ).trim();
+  if (!behind) return;
+
+  const choice = await selectPrompt(
+    `\`${target}\` is not up-to-date.`,
+    [
+      { label: `Update \`${target}\` from \`${remoteName}\``, value: "update" },
+      { label: "Skip", value: "skip" },
+    ],
+    stdin
+  );
+
+  if (choice === "update") {
+    // Fast-forward the local branch to the already-fetched tracking ref.
+    // merge-base --is-ancestor exits non-zero when local has diverged.
+    const ff = await Bun.$`git merge-base --is-ancestor ${target} ${upstream}`
+      .cwd(cwd)
+      .quiet()
+      .nothrow();
+    if (ff.exitCode !== 0) {
+      throw new Error(
+        `Failed to update \`${target}\` from \`${remoteName}\`: non-fast-forward`
+      );
+    }
+    await Bun.$`git branch -f ${target} ${upstream}`.cwd(cwd).quiet();
   }
 }
 

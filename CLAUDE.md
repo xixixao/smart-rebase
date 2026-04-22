@@ -19,6 +19,14 @@ Default to using Bun instead of Node.js.
 - Prefer `Bun.file` over `node:fs`'s readFile/writeFile
 - Bun.$`ls` instead of execa.
 
+## Linting and Type Checking
+
+- `bun run lint` — runs ESLint
+- `bun run typecheck` — runs `tsc --noEmit`
+- `bun check` — runs lint, typecheck, and tests together
+
+Run `bun check` before considering a task complete.
+
 ## Validation
 
 Use `arktype` to validate all external data (API responses, user input). Don't use zod.

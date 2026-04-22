@@ -18,10 +18,10 @@
   },
   "private": true,
   "scripts": {
+    "check": "bun run lint && bun run typecheck && bun run test",
     "lint": "eslint .",
     "start": "bun run src/manual/entry.ts",
     "test": "bun test",
-    "test:coverage": "bun test --coverage",
     "typecheck": "tsc --noEmit"
   },
   "type": "module",

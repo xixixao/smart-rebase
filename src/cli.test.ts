@@ -989,3 +989,17 @@ test("exits with error when target update fails due to diverged branches", async
   );
   expect(stdout).toBe("Rebasing onto branch `main`.\n");
 });
+
+test("exits with error when upstream tracking branch has unexpected format", async () => {
+  const repoPath = await makeGitRepo();
+  await Bun.$`git checkout -b feature`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "feature work"`.cwd(repoPath).quiet();
+  // Configure main's upstream as a local branch (remote ".") — git rev-parse --abbrev-ref
+  // then returns just "feature" (no slash), which triggers the upstream format validation.
+  await Bun.$`git config branch.main.remote .`.cwd(repoPath).quiet();
+  await Bun.$`git config branch.main.merge refs/heads/feature`.cwd(repoPath).quiet();
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).not.toBe(0);
+  expect(stdout).toBe("Rebasing onto branch `main`.\n");
+  expect(stderr).toBe("Unexpected upstream format: feature\n");
+});

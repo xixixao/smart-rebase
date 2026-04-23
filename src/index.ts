@@ -4,18 +4,23 @@ import { fetchMergedMRsSince, type MRWithCommits } from "./gitlab";
 import { readCache, writeCache } from "./storage";
 import { selectPrompt } from "./manual/prompt";
 import { q } from "./format";
+import { typedRegExp } from "ts-regexp";
 
 export async function main(
   args: string[],
-  opts: { cwd?: string; stdinLines?: AsyncIterator<string>; stdin?: NodeJS.ReadableStream } = {}
+  opts: {
+    cwd?: string;
+    stdinLines?: AsyncIterator<string>;
+    stdin?: NodeJS.ReadableStream;
+  } = {},
 ): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
-  const argv = await createCli(args).parseAsync() as Argv;
+  const argv = (await createCli(args).parseAsync()) as Argv;
 
   await ensureGitRepo(cwd);
 
   const target = argv.target ?? "main";
-  
+
   if (!argv.target) {
     console.log(`Rebasing onto branch ${q("main")}.`);
   }
@@ -33,13 +38,14 @@ export async function main(
   const projectId = await getProjectId(cwd);
 
   const baseSha = await getBaseSha(cwd, target);
-  const [baseDate, targetShas, currentBranch, currentBranchShas, cached] = await Promise.all([
-    getBaseCommitDate(cwd, baseSha),
-    getTargetShas(cwd, baseSha, target),
-    getCurrentBranch(cwd),
-    getCurrentBranchShas(cwd, baseSha),
-    readCache(gitlabUrl, projectId),
-  ]);
+  const [baseDate, targetShas, currentBranch, currentBranchShas, cached] =
+    await Promise.all([
+      getBaseCommitDate(cwd, baseSha),
+      getTargetShas(cwd, baseSha, target),
+      getCurrentBranch(cwd),
+      getCurrentBranchShas(cwd, baseSha),
+      readCache(gitlabUrl, projectId),
+    ]);
 
   const fresh = await fetchMergedMRsSince({
     baseUrl: gitlabUrl,
@@ -61,12 +67,12 @@ export async function main(
       mr.merged_at !== null &&
       new Date(mr.merged_at) >= sinceDate &&
       ((mr.merge_commit_sha !== null && targetShas.has(mr.merge_commit_sha)) ||
-        commits.some((c) => targetShas.has(c.id)))
+        commits.some((c) => targetShas.has(c.id))),
   );
 
   if (currentBranchShas.length === 0) {
     throw new Error(
-      `No commits on branch ${q(currentBranch)} ahead of ${q(target)}.`
+      `No commits on branch ${q(currentBranch)} ahead of ${q(target)}.`,
     );
   }
 
@@ -74,20 +80,30 @@ export async function main(
   for (const { commits } of mrsWithCommits) {
     for (const commit of commits) mergedCommitIds.add(commit.id);
   }
-  const alreadyMergedCount = currentBranchShas.filter((sha) => mergedCommitIds.has(sha)).length;
+  const alreadyMergedCount = currentBranchShas.filter((sha) =>
+    mergedCommitIds.has(sha),
+  ).length;
   const willRebaseCount = currentBranchShas.length - alreadyMergedCount;
 
   if (willRebaseCount === 0) {
     const n = alreadyMergedCount;
     throw new Error(
-      `The ${n} ${n === 1 ? "commit" : "commits"} on branch ${q(currentBranch)} ${n === 1 ? "has" : "have"} already been merged to ${q(target)}.`
+      `The ${n} ${n === 1 ? "commit" : "commits"} on branch ${q(
+        currentBranch,
+      )} ${n === 1 ? "has" : "have"} already been merged to ${q(target)}.`,
     );
   }
 
-  const mergedStr = `${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit" : "commits"}`;
-  const willRebaseStr = `${willRebaseCount} ${willRebaseCount === 1 ? "commit" : "commits"}`;
+  const mergedStr = `${alreadyMergedCount} ${
+    alreadyMergedCount === 1 ? "commit" : "commits"
+  }`;
+  const willRebaseStr = `${willRebaseCount} ${
+    willRebaseCount === 1 ? "commit" : "commits"
+  }`;
   console.log(
-    `Rebasing ${q(currentBranch)} onto ${q(target)}. ${mergedStr} ${alreadyMergedCount === 1 ? "has" : "have"} already been merged to ${q(target)}. Will rebase ${willRebaseStr}.`
+    `Rebasing ${q(currentBranch)} onto ${q(target)}. ${mergedStr} ${
+      alreadyMergedCount === 1 ? "has" : "have"
+    } already been merged to ${q(target)}. Will rebase ${willRebaseStr}.`,
   );
 
   for (const { mr, commits } of mrsWithCommits) {
@@ -101,19 +117,27 @@ export async function main(
 async function checkAndUpdateTargetBranch(
   cwd: string,
   target: string,
-  stdin?: NodeJS.ReadableStream
+  stdin?: NodeJS.ReadableStream,
 ): Promise<void> {
   let upstream: string;
   try {
     upstream = (
-      await Bun.$`git rev-parse --abbrev-ref ${target}@{u}`.cwd(cwd).quiet().text()
+      await Bun.$`git rev-parse --abbrev-ref ${target}@{u}`
+        .cwd(cwd)
+        .quiet()
+        .text()
     ).trim();
   } catch {
     return;
   }
 
-  const remoteName = upstream.split("/")[0]!;
-  const remoteBranch = upstream.split("/").slice(1).join("/");
+  const upstreamMatch = typedRegExp(
+    "^(?<remoteName>[^/]+)/(?<remoteBranch>.+)$",
+  ).matchIn(upstream);
+  if (upstreamMatch === null) {
+    throw new Error(`Unexpected upstream format: ${upstream}`);
+  }
+  const { remoteName, remoteBranch } = upstreamMatch.groups;
 
   // Fetch to get the real current state of the remote branch.
   await Bun.$`git fetch ${remoteName} ${remoteBranch}`.cwd(cwd).quiet();
@@ -126,10 +150,13 @@ async function checkAndUpdateTargetBranch(
   const choice = await selectPrompt(
     `Branch ${q(target)} is not up-to-date.`,
     [
-      { label: `Update branch ${q(target)} from remote ${q(remoteName)}`, value: "update" },
+      {
+        label: `Update branch ${q(target)} from remote ${q(remoteName)}`,
+        value: "update",
+      },
       { label: "Skip", value: "skip" },
     ],
-    stdin
+    stdin,
   );
 
   if (choice === "update") {
@@ -141,7 +168,9 @@ async function checkAndUpdateTargetBranch(
       .nothrow();
     if (ff.exitCode !== 0) {
       throw new Error(
-        `Cannot update branch ${q(target)}: it has diverged from branch ${q(upstream)}.`
+        `Cannot update branch ${q(target)}: it has diverged from branch ${q(
+          upstream,
+        )}.`,
       );
     }
     await Bun.$`git branch -f ${target} ${upstream}`.cwd(cwd).quiet();
@@ -158,7 +187,7 @@ async function getProjectId(cwd: string): Promise<string> {
     if (match) return match[1]!;
   }
   throw new Error(
-    "Cannot determine GitLab project. Set GITLAB_PROJECT or configure a GitLab remote."
+    "Cannot determine GitLab project. Set GITLAB_PROJECT or configure a GitLab remote.",
   );
 }
 
@@ -166,45 +195,85 @@ async function ensureGitRepo(cwd: string): Promise<void> {
   try {
     await Bun.$`git rev-parse --git-dir`.cwd(cwd).quiet();
   } catch {
-    throw new Error(`Not a Git repository. ${q("gitlab-rebase")} must be used inside a Git repo.`);
+    throw new Error(
+      `Not a Git repository. ${q(
+        "gitlab-rebase",
+      )} must be used inside a Git repo.`,
+    );
   }
 }
 
 async function getBaseSha(cwd: string, target: string): Promise<string> {
   try {
-    return (await Bun.$`git merge-base HEAD ${target}`.cwd(cwd).quiet().text()).trim();
+    return (
+      await Bun.$`git merge-base HEAD ${target}`.cwd(cwd).quiet().text()
+    ).trim();
   } catch {
     throw new Error(
-      `Cannot find merge base with branch ${q(target)}. Make sure the branch exists and has commits in common with HEAD.`
+      `Cannot find merge base with branch ${q(
+        target,
+      )}. Make sure the branch exists and has commits in common with HEAD.`,
     );
   }
 }
 
-async function getBaseCommitDate(cwd: string, baseSha: string): Promise<string> {
-  return (await Bun.$`git log -1 --format=%cI ${baseSha}`.cwd(cwd).quiet().text()).trim();
+async function getBaseCommitDate(
+  cwd: string,
+  baseSha: string,
+): Promise<string> {
+  return (
+    await Bun.$`git log -1 --format=%cI ${baseSha}`.cwd(cwd).quiet().text()
+  ).trim();
 }
 
-async function getTargetShas(cwd: string, baseSha: string, target: string): Promise<Set<string>> {
+async function getTargetShas(
+  cwd: string,
+  baseSha: string,
+  target: string,
+): Promise<Set<string>> {
   const out = (
-    await Bun.$`git log ${baseSha}..${target} --format=%H`.cwd(cwd).quiet().text()
+    await Bun.$`git log ${baseSha}..${target} --format=%H`
+      .cwd(cwd)
+      .quiet()
+      .text()
   ).trim();
   if (!out) return new Set();
-  return new Set(out.split("\n").map((s) => s.trim()).filter(Boolean));
+  return new Set(
+    out
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
 }
 
 async function getCurrentBranch(cwd: string): Promise<string> {
-  return (await Bun.$`git rev-parse --abbrev-ref HEAD`.cwd(cwd).quiet().text()).trim();
+  return (
+    await Bun.$`git rev-parse --abbrev-ref HEAD`.cwd(cwd).quiet().text()
+  ).trim();
 }
 
-async function getCurrentBranchShas(cwd: string, baseSha: string): Promise<string[]> {
-  const out = (await Bun.$`git log ${baseSha}..HEAD --format=%H`.cwd(cwd).quiet().text()).trim();
+async function getCurrentBranchShas(
+  cwd: string,
+  baseSha: string,
+): Promise<string[]> {
+  const out = (
+    await Bun.$`git log ${baseSha}..HEAD --format=%H`.cwd(cwd).quiet().text()
+  ).trim();
   if (!out) return [];
-  return out.split("\n").map((s) => s.trim()).filter(Boolean);
+  return out
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {
   const output = (await Bun.$`git remote`.cwd(cwd).quiet().text()).trim();
-  const remotes = output ? output.split("\n").map((r) => r.trim()).filter(Boolean) : [];
+  const remotes = output
+    ? output
+        .split("\n")
+        .map((r) => r.trim())
+        .filter(Boolean)
+    : [];
 
   let remoteName: string;
   if (remotes.includes("origin")) {
@@ -215,5 +284,7 @@ async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {
     return null;
   }
 
-  return (await Bun.$`git remote get-url ${remoteName}`.cwd(cwd).quiet().text()).trim();
+  return (
+    await Bun.$`git remote get-url ${remoteName}`.cwd(cwd).quiet().text()
+  ).trim();
 }

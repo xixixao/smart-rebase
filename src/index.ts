@@ -183,8 +183,8 @@ async function getProjectId(cwd: string): Promise<string> {
   }
   const remoteUrl = await resolveGitLabRemoteUrl(cwd);
   if (remoteUrl !== null) {
-    const match = remoteUrl.match(/gitlab\.com[:/](.+?)(?:\.git)?$/);
-    if (match) return match[1]!;
+    const match = typedRegExp("gitlab\\.com[:/](?<projectId>.+?)(?:\\.git)?$").matchIn(remoteUrl);
+    if (match) return match.groups.projectId;
   }
   throw new Error(
     "Cannot determine GitLab project. Set GITLAB_PROJECT or configure a GitLab remote.",

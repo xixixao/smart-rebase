@@ -112,7 +112,7 @@ async function checkAndUpdateTargetBranch(
     return;
   }
 
-  const remoteName = upstream.split("/")[0];
+  const remoteName = upstream.split("/")[0]!;
   const remoteBranch = upstream.split("/").slice(1).join("/");
 
   // Fetch to get the real current state of the remote branch.

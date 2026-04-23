@@ -16,8 +16,29 @@ function Indicator({ isSelected = false }: { isSelected?: boolean }) {
 }
 
 function ItemText({ isSelected = false, label }: { isSelected?: boolean; label: string }) {
-  const [number,text] = label.split(". ", 2);
-  return <Text color={isSelected ? "blueBright" : undefined}><Text dimColor color="white">{number}. </Text>{text}</Text>;
+  const [number, rawText] = label.split(". ", 2);
+  const text = rawText ?? "";
+  const parts: { text: string; isCode: boolean }[] = [];
+  const regex = /\x1b\[94m(.*?)\x1b\[0m/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push({ text: text.slice(lastIndex, match.index), isCode: false });
+    parts.push({ text: match[1]!, isCode: true });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) parts.push({ text: text.slice(lastIndex), isCode: false });
+  if (parts.length === 0) parts.push({ text, isCode: false });
+  return (
+    <Text color={isSelected ? "blueBright" : undefined}>
+      <Text dimColor color="white">{number ?? ""}. </Text>
+      {parts.map((part, i) =>
+        part.isCode
+          ? <Text key={i} color={isSelected ? "blue" : "blueBright"}>{part.text}</Text>
+          : <Text key={i}>{part.text}</Text>
+      )}
+    </Text>
+  );
 }
 
 export async function selectPrompt(

@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { createInterface } from "node:readline";
 import { join, dirname } from "node:path";
 import { mkdir } from "node:fs/promises";
@@ -7,7 +8,6 @@ export const GITLAB_TOKEN_URL =
   "https://gitlab.com/-/user_settings/personal_access_tokens?name=gitlab-rebase&scopes=api";
 
 export interface GitLabAuth {
-  username: string;
   token: string;
 }
 
@@ -34,15 +34,15 @@ function getSettingsPath(): string {
   }
 }
 
+const SettingsSchema = type({ "token?": "string" });
+
 async function loadSettings(): Promise<Partial<GitLabAuth>> {
   const file = Bun.file(getSettingsPath());
   if (!(await file.exists())) return {};
   try {
-    const data = await file.json();
-    return {
-      username: typeof data.username === "string" ? data.username : undefined,
-      token: typeof data.token === "string" ? data.token : undefined,
-    };
+    const data = SettingsSchema(await file.json());
+    if (data instanceof type.errors) return {};
+    return { token: data.token };
   } catch {
     return {};
   }
@@ -59,6 +59,38 @@ async function saveSettings(auth: GitLabAuth): Promise<string | null> {
   }
 }
 
+function getNetrcPath(): string {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+  return join(home, ".netrc");
+}
+
+async function loadNetrc(machine: string): Promise<string | undefined> {
+  const file = Bun.file(getNetrcPath());
+  if (!(await file.exists())) return undefined;
+  try {
+    const text = await file.text();
+    // Tokenize the .netrc file (comments start with #)
+    const tokens = text
+      .split(/\s+/)
+      .filter((t) => t.length > 0 && !t.startsWith("#"));
+    let i = 0;
+    while (i < tokens.length) {
+      if (tokens[i] === "machine" && tokens[i + 1] === machine) {
+        i += 2;
+        while (i < tokens.length && tokens[i] !== "machine" && tokens[i] !== "default") {
+          if (tokens[i] === "password") return tokens[i + 1];
+          i += 2;
+        }
+        return undefined;
+      }
+      i++;
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
 export async function getAuth(stdinLines?: AsyncIterator<string>): Promise<GitLabAuth> {
   const lines = stdinLines ?? getDefaultStdinLines();
 
@@ -70,14 +102,16 @@ export async function getAuth(stdinLines?: AsyncIterator<string>): Promise<GitLa
 
   const saved = await loadSettings();
 
-  let username = process.env.GITLAB_USERNAME ?? saved.username;
-  let token = process.env.GITLAB_TOKEN ?? saved.token;
-  let prompted = false;
+  let token = process.env.GITLAB_TOKEN;
 
-  if (!username) {
-    process.stderr.write("GITLAB_USERNAME is not set.\n");
-    username = await prompt("Enter your GitLab username: ");
-    prompted = true;
+  if (!token) {
+    const gitlabUrl = process.env.GITLAB_URL ?? "https://gitlab.com";
+    const machine = new URL(gitlabUrl).hostname;
+    token = await loadNetrc(machine);
+  }
+
+  if (!token) {
+    token = saved.token;
   }
 
   if (!token) {
@@ -88,15 +122,11 @@ export async function getAuth(stdinLines?: AsyncIterator<string>): Promise<GitLa
       await openBrowser(GITLAB_TOKEN_URL);
       token = await prompt("Enter your GitLab API token: ");
     }
-    prompted = true;
-  }
-
-  if (prompted) {
-    const savedPath = await saveSettings({ username, token });
+    const savedPath = await saveSettings({ token });
     if (savedPath) {
       process.stderr.write(`Credentials saved to ${savedPath}\n`);
     }
   }
 
-  return { username, token };
+  return { token };
 }

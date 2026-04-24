@@ -53,18 +53,20 @@ const mockGitLab = Bun.serve({
 // two commits (sha1, sha2) that landed after the feature branch diverged.
 let defaultTestCwd = "";
 let defaultMainShas: [string, string] = ["", ""];
+let defaultFeatureSha = "";
 
 beforeAll(async () => {
   const { repoPath, mainCommitShas } = await makeRepoWithDivergedBranch();
   defaultTestCwd = repoPath;
   defaultMainShas = mainCommitShas;
+  defaultFeatureSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
 });
 
 afterAll(() => {
   mockGitLab.stop();
   rmSync(testConfigDir, { recursive: true, force: true });
 });
-beforeEach(() => {
+beforeEach(async () => {
   mockMRs = [];
   mockCommits.clear();
   lastRequestedProject = "";
@@ -73,6 +75,11 @@ beforeEach(() => {
   mockMRsStatusCode = 200;
   mockCommitsErrorIid = null;
   try { rmSync(testCredsFile); } catch {}
+  // Reset shared repo: git rebase in main() moves the feature branch, so restore it.
+  if (defaultTestCwd && defaultFeatureSha) {
+    await Bun.$`git checkout feature`.cwd(defaultTestCwd).quiet().nothrow();
+    await Bun.$`git reset --hard ${defaultFeatureSha}`.cwd(defaultTestCwd).quiet().nothrow();
+  }
 });
 
 const GITLAB_URL = `http://localhost:${mockGitLab.port}`;
@@ -677,6 +684,9 @@ test("merges cached older MRs with fresh ones", async () => {
   mockCommits.set(1, []);
   await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
 
+  // First run rebases the feature branch; reset it so the second run sees the same repo state.
+  await Bun.$`git reset --hard ${defaultFeatureSha}`.cwd(defaultTestCwd).quiet();
+
   mockMRs = [{ iid: 2, title: "New MR", merge_commit_sha: defaultMainShas[1], merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(2, []);
   const { stdout, exitCode } = await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
@@ -692,6 +702,9 @@ test("fresh data replaces cached version of same MR", async () => {
   mockMRs = [{ iid: 1, title: "Old title", merge_commit_sha: defaultMainShas[0], merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, []);
   await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
+
+  // First run rebases the feature branch; reset it so the second run sees the same repo state.
+  await Bun.$`git reset --hard ${defaultFeatureSha}`.cwd(defaultTestCwd).quiet();
 
   mockMRs = [{ iid: 1, title: "Updated title", merge_commit_sha: defaultMainShas[0], merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, []);
@@ -981,6 +994,11 @@ const STASH_PROMPT_SKIP_SELECTED =
   "\n" +
   "↑↓ to navigate · Enter to select\n";
 const STASH_PROGRESS = "Stashing changes...\n";
+const REBASE_PROGRESS = "Rebasing 1 commit onto `main`...\n";
+// git rebase prints "Rebasing (N/M)" per commit, then the final summary.
+const REBASE_SUCCESS = "Rebasing (1/1)\nSuccessfully rebased and updated refs/heads/feature.\n";
+// When baseSha equals target tip, git rebase --onto is a no-op.
+const REBASE_UPTODATE = "Current branch feature is up to date.\n";
 
 async function makeRepoWithRemoteAhead(): Promise<{
   repoPath: string;
@@ -1003,7 +1021,7 @@ async function makeRepoWithRemoteAhead(): Promise<{
 test("shows no update prompt when target has no upstream tracking", async () => {
   const { stderr, stdout, exitCode } = await run([]);
   expect(exitCode).toBe(0);
-  expect(stderr).toBe("");
+  expect(stderr).toBe(REBASE_PROGRESS + REBASE_SUCCESS);
   expect(stdout.trim()).toBe(DEFAULT_STDOUT);
 });
 
@@ -1019,7 +1037,8 @@ test("shows no update prompt when target is already up to date with remote", asy
 
   const { stderr, stdout, exitCode } = await run([], { cwd: localPath });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe("");
+  // feature is already on top of main, so rebase is a no-op
+  expect(stderr).toBe(REBASE_PROGRESS + REBASE_UPTODATE);
   expect(stdout.trim()).toBe(DEFAULT_STDOUT);
 });
 
@@ -1027,7 +1046,7 @@ test("shows update prompt when target branch is behind remote", async () => {
   const { repoPath } = await makeRepoWithRemoteAhead();
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS);
+  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_PROGRESS + REBASE_SUCCESS);
   expect(stdout.trim()).toBe(DEFAULT_STDOUT);
 });
 
@@ -1035,7 +1054,7 @@ test("updates target branch when user selects Update", async () => {
   const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS);
+  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_PROGRESS + REBASE_SUCCESS);
   expect(stdout.trim()).toBe(DEFAULT_STDOUT);
   const localMainSha = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainSha).toBe(remoteNewSha);
@@ -1073,7 +1092,8 @@ test("skips update when user selects Skip", async () => {
   const localMainShaBefore = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_DOWN + KEY_ENTER });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT_SKIP_SELECTED);
+  // main tip == baseSha here, so rebase --onto is a no-op
+  expect(stderr).toBe(UPDATE_PROMPT_SKIP_SELECTED + REBASE_PROGRESS + REBASE_UPTODATE);
   expect(stdout.trim()).toBe(DEFAULT_STDOUT);
   const localMainShaAfter = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainShaAfter).toBe(localMainShaBefore);
@@ -1115,7 +1135,7 @@ test("shows stash prompt before update prompt when dirty changes exist", async (
   expect(exitCode).toBe(0);
   // git stash output includes a dynamic SHA, so check the static parts around it
   expect(stderr.startsWith(STASH_PROMPT_STASH_SELECTED + STASH_PROGRESS)).toBe(true);
-  expect(stderr.endsWith(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS)).toBe(true);
+  expect(stderr.endsWith(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_PROGRESS + REBASE_SUCCESS)).toBe(true);
 });
 
 test("stashes changes when user selects Stash", async () => {
@@ -1135,11 +1155,16 @@ test("does not stash when user selects Skip on stash prompt", async () => {
     cwd: repoPath,
     inkStdin: KEY_DOWN + KEY_ENTER + KEY_ENTER,
   });
-  expect(exitCode).toBe(0);
+  // Staged changes were not stashed, so git rebase refuses to run.
+  expect(exitCode).not.toBe(0);
   expect(stderr).toBe(
     STASH_PROMPT_SKIP_SELECTED +
-    UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS,
+    UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS +
+    REBASE_PROGRESS +
+    "error: cannot rebase: Your index contains uncommitted changes.\n" +
+    "error: Please commit or stash them.\n",
   );
+  // Nothing was stashed despite the failure.
   const stashList = (await Bun.$`git stash list`.cwd(repoPath).text()).trim();
   expect(stashList).toBe("");
 });
@@ -1148,7 +1173,76 @@ test("no stash prompt shown when working tree is clean", async () => {
   const { repoPath } = await makeRepoWithRemoteAhead();
   const { stderr, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS);
+  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_PROGRESS + REBASE_SUCCESS);
+});
+
+// --- rebase tests ---
+
+test("rebases current branch onto target after listing MRs", async () => {
+  // defaultTestCwd: feature diverges from main at the initial commit; main has 2 extra commits.
+  const mainTip = defaultMainShas[1]!;
+  const { stdout, stderr, exitCode } = await run([]);
+  expect(exitCode).toBe(0);
+  expect(stdout.trim()).toBe(DEFAULT_STDOUT);
+  expect(stderr).toBe(REBASE_PROGRESS + REBASE_SUCCESS);
+  // After rebase, feature's parent should be main's tip.
+  const featureParent = (await Bun.$`git rev-parse HEAD~1`.cwd(defaultTestCwd).text()).trim();
+  expect(featureParent).toBe(mainTip);
+});
+
+test("skips already-merged commits and rebases only the remaining ones", async () => {
+  const repoPath = await makeGitRepo();
+  await Bun.$`git checkout -b feature`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "merged commit"`.cwd(repoPath).quiet();
+  const mergedSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
+  await Bun.$`git commit --allow-empty -m "new work"`.cwd(repoPath).quiet();
+  await Bun.$`git checkout main`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "landed on main"`.cwd(repoPath).quiet();
+  const mainSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
+  await Bun.$`git checkout feature`.cwd(repoPath).quiet();
+
+  // MR whose merge_commit_sha is on main, and whose commits include the first feature commit.
+  mockMRs = [{ iid: 1, title: "Merged MR", merge_commit_sha: mainSha, merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(1, [{ id: mergedSha, short_id: mergedSha.slice(0, 8), title: "merged commit" }]);
+
+  const { stdout, stderr, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).toBe(0);
+  expect(stdout).toBe(
+    "Rebasing onto branch `main`.\n" +
+    "Rebasing `feature` onto `main`. 1 commit has already been merged to `main`. Will rebase 1 commit.\n" +
+    "!1 Merged MR\n" +
+    `  ${mergedSha.slice(0, 8)} merged commit\n`,
+  );
+  expect(stderr).toBe(REBASE_PROGRESS + REBASE_SUCCESS);
+  // After rebase, "new work" is on top of main's new commit; "merged commit" was dropped.
+  const headParent = (await Bun.$`git rev-parse HEAD~1`.cwd(repoPath).text()).trim();
+  expect(headParent).toBe(mainSha);
+  const headMsg = (await Bun.$`git log -1 --format=%s HEAD`.cwd(repoPath).text()).trim();
+  expect(headMsg).toBe("new work");
+});
+
+test("exits with error when git rebase encounters conflicts", async () => {
+  const repoPath = await makeGitRepo();
+  // Create conflicting file on main
+  await Bun.write(join(repoPath, "conflict.txt"), "main content\n");
+  await Bun.$`git add conflict.txt`.cwd(repoPath).quiet();
+  await Bun.$`git commit -m "main adds conflict.txt"`.cwd(repoPath).quiet();
+  const mainSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
+  // Create feature branch from before main's commit with conflicting change
+  await Bun.$`git checkout -b feature HEAD~1`.cwd(repoPath).quiet();
+  await Bun.write(join(repoPath, "conflict.txt"), "feature content\n");
+  await Bun.$`git add conflict.txt`.cwd(repoPath).quiet();
+  await Bun.$`git commit -m "feature adds conflict.txt"`.cwd(repoPath).quiet();
+
+  mockMRs = [{ iid: 1, title: "Conflict MR", merge_commit_sha: mainSha, merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(1, []);
+
+  const { stderr, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).not.toBe(0);
+  // git rebase aborts and its output includes CONFLICT
+  expect(stderr).toContain("CONFLICT");
+  // Clean up mid-rebase state so the temp dir is usable
+  await Bun.$`git rebase --abort`.cwd(repoPath).quiet().nothrow();
 });
 
 test("exits with error when upstream tracking branch has unexpected format", async () => {

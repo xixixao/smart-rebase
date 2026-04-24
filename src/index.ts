@@ -113,6 +113,41 @@ export async function main(
       console.log(`  ${commit.short_id} ${commit.title}`);
     }
   }
+
+  // Re-check current branch; stash/update steps could in principle change it.
+  const branchBeforeRebase = await getCurrentBranch(cwd);
+  if (branchBeforeRebase !== target) {
+    // Find the oldest non-merged commit; everything from its parent onward gets rebased.
+    const reversedShas = [...currentBranchShas].reverse();
+    const firstNonMergedIdx = reversedShas.findIndex((sha) => !mergedCommitIds.has(sha));
+    const rebaseUpstream =
+      firstNonMergedIdx === 0 ? baseSha : reversedShas[firstNonMergedIdx - 1]!;
+
+    let rebaseOutput = "";
+    await withProgress(
+      `Rebasing ${willRebaseStr} onto ${q(target)}...`,
+      async () => {
+        const r = await Bun.$`git rebase --onto ${target} ${rebaseUpstream}`
+          .cwd(cwd)
+          .quiet()
+          .nothrow();
+        // git rebase uses \r (carriage return) to overwrite progress lines in
+        // the terminal. Normalise to \n, then drop whitespace-only lines so
+        // the captured output is clean.
+        rebaseOutput = (r.stdout.toString() + r.stderr.toString())
+          .replace(/\r/g, "\n")
+          .split("\n")
+          .filter((l) => l.trim())
+          .join("\n");
+        if (r.exitCode !== 0) {
+          throw new Error(rebaseOutput);
+        }
+      },
+    );
+    if (rebaseOutput) {
+      process.stderr.write(rebaseOutput + "\n");
+    }
+  }
 }
 
 async function checkAndStashDirtyChanges(

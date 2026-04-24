@@ -2,7 +2,7 @@ import { createCli, type Argv } from "./cli";
 import { getAuth } from "./auth";
 import { fetchMergedMRsSince, type MRWithCommits } from "./gitlab";
 import { readCache, writeCache } from "./storage";
-import { selectPrompt } from "./manual/prompt";
+import { selectPrompt, withProgress } from "./manual/prompt";
 import { q } from "./format";
 import { typedRegExp } from "ts-regexp";
 
@@ -18,6 +18,7 @@ export async function main(
   const argv = (await createCli(args).parseAsync()) as Argv;
 
   await ensureGitRepo(cwd);
+  await checkAndStashDirtyChanges(cwd, opts.stdin);
 
   const target = argv.target ?? "main";
 
@@ -114,6 +115,31 @@ export async function main(
   }
 }
 
+async function checkAndStashDirtyChanges(
+  cwd: string,
+  stdin?: NodeJS.ReadableStream,
+): Promise<void> {
+  const result = await Bun.$`git diff --quiet HEAD`.cwd(cwd).quiet().nothrow();
+  if (result.exitCode === 0) return;
+
+  const choice = await selectPrompt(
+    "You have uncommitted changes.",
+    [
+      { label: "Stash changes", value: "stash" },
+      { label: "Skip", value: "skip" },
+    ],
+    stdin,
+  );
+  if (choice === "stash") {
+    let stashOutput = "";
+    await withProgress("Stashing changes...", async () => {
+      const r = await Bun.$`git stash push`.cwd(cwd).quiet();
+      stashOutput = (r.stdout.toString() + r.stderr.toString()).trim();
+    });
+    process.stderr.write(stashOutput + "\n");
+  }
+}
+
 async function checkAndUpdateTargetBranch(
   cwd: string,
   target: string,
@@ -173,7 +199,20 @@ async function checkAndUpdateTargetBranch(
         )}.`,
       );
     }
-    await Bun.$`git branch -f ${target} ${upstream}`.cwd(cwd).quiet();
+    await withProgress(
+      `Updating branch ${q(target)} from remote ${q(remoteName)}...`,
+      async () => {
+        const currentBranch = (
+          await Bun.$`git branch --show-current`.cwd(cwd).quiet().text()
+        ).trim();
+        if (currentBranch === target) {
+          await Bun.$`git reset --hard ${upstream}`.cwd(cwd).quiet();
+        } else {
+          await Bun.$`git branch -f ${target} ${upstream}`.cwd(cwd).quiet();
+        }
+      },
+    );
+    process.stderr.write(`Branch ${q(target)} updated.\n`);
   }
 }
 
@@ -183,7 +222,9 @@ async function getProjectId(cwd: string): Promise<string> {
   }
   const remoteUrl = await resolveGitLabRemoteUrl(cwd);
   if (remoteUrl !== null) {
-    const match = typedRegExp("gitlab\\.com[:/](?<projectId>.+?)(?:\\.git)?$").matchIn(remoteUrl);
+    const match = typedRegExp(
+      "gitlab\\.com[:/](?<projectId>.+?)(?:\\.git)?$",
+    ).matchIn(remoteUrl);
     if (match) return match.groups.projectId;
   }
   throw new Error(

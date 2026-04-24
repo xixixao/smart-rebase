@@ -109,20 +109,21 @@ function parseKeySequences(keys: string): string[] {
 class TestStdin extends EventEmitter {
   isTTY = true;
   data: Buffer | string | null = null;
-  private queued: string[] = [];
+  private remaining: string[] = [];
   enqueue(sequences: string[]): void {
-    this.queued = sequences;
+    this.remaining = [...sequences];
   }
   setRawMode = (mode: boolean): void => {
-    if (!mode || this.queued.length === 0) return;
-    const seqs = this.queued;
-    this.queued = [];
-    const send = (i: number): void => {
-      if (i >= seqs.length) return;
-      this.write(Buffer.from(seqs[i]!));
-      setImmediate(() => send(i + 1));
+    if (!mode || this.remaining.length === 0) return;
+    // Send keys one at a time; pause after Enter so the next prompt's
+    // setRawMode(true) picks up from where this one left off.
+    const send = (): void => {
+      if (this.remaining.length === 0) return;
+      const seq = this.remaining.shift()!;
+      this.write(Buffer.from(seq));
+      if (seq !== "\r") setImmediate(send);
     };
-    setImmediate(() => send(0));
+    setImmediate(send);
   };
   write = (data: Buffer | string): void => {
     this.data = data;
@@ -954,14 +955,32 @@ const UPDATE_PROMPT_UPDATE_SELECTED =
   "❯ 1. Update branch `main` from remote `origin`\n" +
   "  2. Skip\n" +
   "\n" +
-  "↑↓ to navigate · Enter to select · Esc to back\n";
+  "↑↓ to navigate · Enter to select\n";
 const UPDATE_PROMPT_SKIP_SELECTED =
   "Branch `main` is not up-to-date.\n" +
   "\n" +
   "  1. Update branch `main` from remote `origin`\n" +
   "❯ 2. Skip\n" +
   "\n" +
-  "↑↓ to navigate · Enter to select · Esc to back\n";
+  "↑↓ to navigate · Enter to select\n";
+const UPDATE_SUCCESS =
+  "Updating branch `main` from remote `origin`...\n" +
+  "Branch `main` updated.\n";
+const STASH_PROMPT_STASH_SELECTED =
+  "You have uncommitted changes.\n" +
+  "\n" +
+  "❯ 1. Stash changes\n" +
+  "  2. Skip\n" +
+  "\n" +
+  "↑↓ to navigate · Enter to select\n";
+const STASH_PROMPT_SKIP_SELECTED =
+  "You have uncommitted changes.\n" +
+  "\n" +
+  "  1. Stash changes\n" +
+  "❯ 2. Skip\n" +
+  "\n" +
+  "↑↓ to navigate · Enter to select\n";
+const STASH_PROGRESS = "Stashing changes...\n";
 
 async function makeRepoWithRemoteAhead(): Promise<{
   repoPath: string;
@@ -1008,7 +1027,7 @@ test("shows update prompt when target branch is behind remote", async () => {
   const { repoPath } = await makeRepoWithRemoteAhead();
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED);
+  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS);
   expect(stdout.trim()).toBe(DEFAULT_STDOUT);
 });
 
@@ -1016,10 +1035,37 @@ test("updates target branch when user selects Update", async () => {
   const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED);
+  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS);
   expect(stdout.trim()).toBe(DEFAULT_STDOUT);
   const localMainSha = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainSha).toBe(remoteNewSha);
+});
+
+test("updates checked-out target branch so index and worktree match remote", async () => {
+  const remotePath = await makeGitRepo();
+  const localPath = mkdtempSync("/tmp/gitlab-rebase-test-");
+  await Bun.$`git clone ${remotePath} ${localPath}`.quiet();
+  await Bun.$`git config user.email "test@example.com"`.cwd(localPath).quiet();
+  await Bun.$`git config user.name "Test User"`.cwd(localPath).quiet();
+  await Bun.$`git config commit.gpgsign false`.cwd(localPath).quiet();
+  await Bun.$`git commit --allow-empty -m "new remote commit"`.cwd(remotePath).quiet();
+  const remoteNewSha = (await Bun.$`git rev-parse HEAD`.cwd(remotePath).text()).trim();
+
+  const { stderr, stdout, exitCode } = await run([], { cwd: localPath, inkStdin: KEY_ENTER });
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toBe(
+    UPDATE_PROMPT_UPDATE_SELECTED +
+      UPDATE_SUCCESS +
+      "No commits on branch `main` ahead of `main`.\n",
+  );
+  expect(stdout).toBe("Rebasing onto branch `main`.\n");
+  expect((await Bun.$`git rev-parse main`.cwd(localPath).text()).trim()).toBe(remoteNewSha);
+  expect((await Bun.$`git rev-parse HEAD`.cwd(localPath).text()).trim()).toBe(remoteNewSha);
+  const wtClean = await Bun.$`git diff --quiet && git diff --cached --quiet`
+    .cwd(localPath)
+    .quiet()
+    .nothrow();
+  expect(wtClean.exitCode).toBe(0);
 });
 
 test("skips update when user selects Skip", async () => {
@@ -1046,6 +1092,63 @@ test("exits with error when target update fails due to diverged branches", async
       "Cannot update branch `main`: it has diverged from branch `origin/main`.\n"
   );
   expect(stdout).toBe("Rebasing onto branch `main`.\n");
+});
+
+// --- stash prompt tests ---
+
+async function makeRepoWithRemoteAheadAndDirty(): Promise<{
+  repoPath: string;
+  remoteNewSha: string;
+}> {
+  const result = await makeRepoWithRemoteAhead();
+  writeFileSync(join(result.repoPath, "dirty.txt"), "dirty content");
+  await Bun.$`git add dirty.txt`.cwd(result.repoPath).quiet();
+  return result;
+}
+
+test("shows stash prompt before update prompt when dirty changes exist", async () => {
+  const { repoPath } = await makeRepoWithRemoteAheadAndDirty();
+  const { stderr, exitCode } = await run([], {
+    cwd: repoPath,
+    inkStdin: KEY_ENTER + KEY_ENTER,
+  });
+  expect(exitCode).toBe(0);
+  // git stash output includes a dynamic SHA, so check the static parts around it
+  expect(stderr.startsWith(STASH_PROMPT_STASH_SELECTED + STASH_PROGRESS)).toBe(true);
+  expect(stderr.endsWith(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS)).toBe(true);
+});
+
+test("stashes changes when user selects Stash", async () => {
+  const { repoPath } = await makeRepoWithRemoteAheadAndDirty();
+  const { exitCode } = await run([], {
+    cwd: repoPath,
+    inkStdin: KEY_ENTER + KEY_ENTER,
+  });
+  expect(exitCode).toBe(0);
+  const stashList = (await Bun.$`git stash list`.cwd(repoPath).text()).trim();
+  expect(stashList).not.toBe("");
+});
+
+test("does not stash when user selects Skip on stash prompt", async () => {
+  const { repoPath } = await makeRepoWithRemoteAheadAndDirty();
+  const { stderr, exitCode } = await run([], {
+    cwd: repoPath,
+    inkStdin: KEY_DOWN + KEY_ENTER + KEY_ENTER,
+  });
+  expect(exitCode).toBe(0);
+  expect(stderr).toBe(
+    STASH_PROMPT_SKIP_SELECTED +
+    UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS,
+  );
+  const stashList = (await Bun.$`git stash list`.cwd(repoPath).text()).trim();
+  expect(stashList).toBe("");
+});
+
+test("no stash prompt shown when working tree is clean", async () => {
+  const { repoPath } = await makeRepoWithRemoteAhead();
+  const { stderr, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
+  expect(exitCode).toBe(0);
+  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS);
 });
 
 test("exits with error when upstream tracking branch has unexpected format", async () => {

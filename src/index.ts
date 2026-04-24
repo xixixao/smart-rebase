@@ -131,12 +131,11 @@ export async function main(
           .cwd(cwd)
           .quiet()
           .nothrow();
-        // git rebase uses \r (carriage return) to overwrite progress lines in
-        // the terminal. Normalise to \n, then drop whitespace-only lines so
-        // the captured output is clean.
+        // git rebase uses bare \r to overwrite progress lines. Split on any
+        // line ending (\r\n, \r, \n) so Windows output is handled correctly,
+        // then drop whitespace-only lines.
         rebaseOutput = (r.stdout.toString() + r.stderr.toString())
-          .replace(/\r/g, "\n")
-          .split("\n")
+          .split(/\r\n|\r|\n/)
           .filter((l) => l.trim())
           .join("\n");
         if (r.exitCode !== 0) {

@@ -418,7 +418,7 @@ test("prints merged MRs with their commits", async () => {
     { id: defaultMainShas[1], short_id: "sha3ful", title: "Add test for fix" },
   ]);
 
-  const { stdout, exitCode } = await run([]);
+  const { stdout, exitCode } = await run(["--verbose"]);
   expect(exitCode).toBe(0);
   expect(stdout).toContain("!1 Add feature");
   expect(stdout).toContain("sha1ful Implement feature");
@@ -446,7 +446,7 @@ test("fetches commits for all MRs", async () => {
   mockCommits.set(20, [{ id: defaultMainShas[0], short_id: "c20", title: "Commit 20" }]);
   mockCommits.set(30, [{ id: defaultMainShas[0], short_id: "c30", title: "Commit 30" }]);
 
-  const { stdout, exitCode } = await run([]);
+  const { stdout, exitCode } = await run(["--verbose"]);
   expect(exitCode).toBe(0);
   expect(stdout).toContain("Commit 10");
   expect(stdout).toContain("Commit 20");
@@ -471,7 +471,7 @@ test("detects project from origin remote", async () => {
   mockMRs = [{ iid: 5, title: "Origin MR", merge_commit_sha: mainCommitShas[0], merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(5, []);
 
-  const { stdout, exitCode } = await run([], {
+  const { stdout, exitCode } = await run(["--verbose"], {
     cwd: repoPath,
     env: { GITLAB_PROJECT: undefined },
   });
@@ -486,7 +486,7 @@ test("detects project from the sole remote when it is not named origin", async (
   mockMRs = [{ iid: 6, title: "Upstream MR", merge_commit_sha: mainCommitShas[0], merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(6, []);
 
-  const { stdout, exitCode } = await run([], {
+  const { stdout, exitCode } = await run(["--verbose"], {
     cwd: repoPath,
     env: { GITLAB_PROJECT: undefined },
   });
@@ -689,7 +689,7 @@ test("merges cached older MRs with fresh ones", async () => {
 
   mockMRs = [{ iid: 2, title: "New MR", merge_commit_sha: defaultMainShas[1], merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(2, []);
-  const { stdout, exitCode } = await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
+  const { stdout, exitCode } = await run(["--verbose"], { env: { GITLAB_CACHE_DIR: tmpDir } });
 
   expect(exitCode).toBe(0);
   expect(stdout).toContain("!1 Old MR");
@@ -708,7 +708,7 @@ test("fresh data replaces cached version of same MR", async () => {
 
   mockMRs = [{ iid: 1, title: "Updated title", merge_commit_sha: defaultMainShas[0], merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, []);
-  const { stdout, exitCode } = await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
+  const { stdout, exitCode } = await run(["--verbose"], { env: { GITLAB_CACHE_DIR: tmpDir } });
 
   expect(exitCode).toBe(0);
   expect(stdout).toContain("Updated title");
@@ -843,7 +843,7 @@ test("defaults target branch to main", async () => {
   mockCommits.set(1, []);
   mockCommits.set(2, []);
 
-  const { stdout, exitCode } = await run([], { cwd: repoPath });
+  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
   expect(stdout).toContain("!1 MR on main");
   expect(stdout).not.toContain("!2 Unrelated MR");
@@ -862,7 +862,7 @@ test("accepts custom target branch as positional arg", async () => {
   mockMRs = [{ iid: 5, title: "Release MR", merge_commit_sha: releaseSha, merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(5, []);
 
-  const { stdout, exitCode } = await run(["release"], { cwd: repoPath });
+  const { stdout, exitCode } = await run(["release", "--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
   expect(stdout).toContain("!5 Release MR");
 });
@@ -872,7 +872,7 @@ test("includes MR matched by individual commit sha when merge_commit_sha is null
   mockMRs = [{ iid: 3, title: "Squash MR", merge_commit_sha: null, merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(3, [{ id: mainCommitShas[0], short_id: mainCommitShas[0].slice(0, 8), title: "squashed" }]);
 
-  const { stdout, exitCode } = await run([], { cwd: repoPath });
+  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
   expect(stdout).toContain("!3 Squash MR");
 });
@@ -946,7 +946,7 @@ test("paginates to fetch MRs until updated_at falls before base commit date", as
   mockCommits.set(2, []);
   mockCommits.set(1, []);
 
-  const { stdout, exitCode } = await run([], { env: { GITLAB_PER_PAGE: "1" } });
+  const { stdout, exitCode } = await run(["--verbose"], { env: { GITLAB_PER_PAGE: "1" } });
   expect(exitCode).toBe(0);
   expect(mrPagesFetched).toBe(2);
   expect(stdout).toContain("!2 Recent MR");
@@ -1205,7 +1205,7 @@ test("skips already-merged commits and rebases only the remaining ones", async (
   mockMRs = [{ iid: 1, title: "Merged MR", merge_commit_sha: mainSha, merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, [{ id: mergedSha, short_id: mergedSha.slice(0, 8), title: "merged commit" }]);
 
-  const { stdout, stderr, exitCode } = await run([], { cwd: repoPath });
+  const { stdout, stderr, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
   expect(stdout).toBe(
     "Rebasing onto branch `main`.\n" +

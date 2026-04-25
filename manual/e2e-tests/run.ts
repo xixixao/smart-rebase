@@ -165,9 +165,9 @@ try {
     console.log(`  MR A: !${mrAIid}`);
   });
 
-  // 8. Create feature-b with three commits (branched from main, not feature-a).
+  // 8. Create feature-b with three commits stacked on top of feature-a.
   await step("Create branch 'feature-b' with 3 commits", async () => {
-    await $`git checkout main`.cwd(repoDir).quiet();
+    await $`git checkout feature-a`.cwd(repoDir).quiet();
     await $`git checkout -b feature-b`.cwd(repoDir).quiet();
 
     await Bun.write(join(repoDir, "feature-b-1.txt"), "Feature B — file 1\n");

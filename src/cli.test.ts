@@ -769,7 +769,7 @@ test("exits normally when GITLAB_TOKEN is set without needing stdin input", asyn
   expect(exitCode).toBe(0);
 });
 
-test("proceeds gracefully when credentials cannot be saved", async () => {
+test("fails with helpful message when credentials cannot be saved", async () => {
   // Place a regular file at the path that would be used as the data directory so mkdir fails
   const blockingBase = mkdtempSync("/tmp/gitlab-rebase-block-");
   const blockingDataDir = join(blockingBase, "gitlab-rebase");
@@ -782,8 +782,10 @@ test("proceeds gracefully when credentials cannot be saved", async () => {
     },
     inkStdin: "mytoken\r",
   });
-  expect(exitCode).toBe(0);
-  expect(stderr).not.toContain("GitLab token saved");
+  expect(exitCode).toBe(1);
+  expect(stderr).toContain("Failed to save credentials");
+  expect(stderr).toContain(blockingDataDir);
+  expect(stderr).toContain("GITLAB_DATA_DIR");
 });
 
 test("handles corrupted cache file gracefully", async () => {
@@ -793,6 +795,19 @@ test("handles corrupted cache file gracefully", async () => {
 
   const { exitCode } = await run([], { env: { GITLAB_DATA_DIR: dataDir } });
   expect(exitCode).toBe(0);
+});
+
+test("fails with helpful message when cache cannot be written", async () => {
+  // Place a regular file at the path that would be used as the data directory so mkdir fails
+  const blockingBase = mkdtempSync("/tmp/gitlab-rebase-block-");
+  const blockingDataDir = join(blockingBase, "gitlab-rebase");
+  writeFileSync(blockingDataDir, "blocker");
+
+  const { stderr, exitCode } = await run([], { env: { GITLAB_DATA_DIR: blockingDataDir } });
+  expect(exitCode).toBe(1);
+  expect(stderr).toContain("Failed to write cache");
+  expect(stderr).toContain(blockingDataDir);
+  expect(stderr).toContain("GITLAB_DATA_DIR");
 });
 
 // --- target branch and base commit tests ---

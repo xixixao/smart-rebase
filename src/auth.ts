@@ -32,15 +32,17 @@ async function loadSettings(): Promise<Partial<GitLabAuth>> {
   }
 }
 
-async function saveSettings(auth: GitLabAuth): Promise<string | null> {
+async function saveSettings(auth: GitLabAuth): Promise<string> {
   const settingsPath = getSettingsPath();
   try {
     await mkdir(getDataDir(), { recursive: true });
     await Bun.write(settingsPath, JSON.stringify(auth, null, 2));
-    return settingsPath;
-  } catch {
-    return null;
+  } catch (e) {
+    throw new Error(
+      `Failed to save credentials to ${settingsPath}: ${e instanceof Error ? e.message : e}\nSet ${q("GITLAB_DATA_DIR")} to change the location.`
+    );
   }
+  return settingsPath;
 }
 
 function getNetrcPath(): string {
@@ -106,9 +108,7 @@ export async function getAuth(stdin?: NodeJS.ReadableStream): Promise<GitLabAuth
       token = await textInputPrompt("Enter your GitLab API token: ", stdin);
     }
     const savedPath = await saveSettings({ token });
-    if (savedPath) {
-      process.stderr.write(`GitLab token saved to ${savedPath}\n`);
-    }
+    process.stderr.write(`GitLab token saved to ${savedPath}\n`);
   }
 
   return { token };

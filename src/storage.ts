@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { MRWithCommits } from "./gitlab";
 import { getDataDir } from "./paths";
+import { q } from "./format";
 
 const CACHE_VERSION = 4;
 
@@ -61,13 +62,13 @@ export async function writeCache(
   projectId: string,
   mrs: MRWithCommits[]
 ): Promise<void> {
+  const path = cachePath(baseUrl, projectId);
   try {
     mkdirSync(getDataDir(), { recursive: true });
-    await Bun.write(
-      cachePath(baseUrl, projectId),
-      JSON.stringify({ version: CACHE_VERSION, mrs })
+    await Bun.write(path, JSON.stringify({ version: CACHE_VERSION, mrs }));
+  } catch (e) {
+    throw new Error(
+      `Failed to write cache to ${path}: ${e instanceof Error ? e.message : e}\nSet ${q("GITLAB_DATA_DIR")} to change the location.`
     );
-  } catch {
-    // cache write failure is non-fatal
   }
 }

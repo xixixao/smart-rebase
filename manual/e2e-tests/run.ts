@@ -12,7 +12,7 @@
 
 import { $ } from "bun";
 import { createInterface } from "node:readline";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -76,7 +76,7 @@ async function glabApi(
 // ---------------------------------------------------------------------------
 
 const repoName = `gitlab-rebase-e2e-${Date.now()}`;
-const workDir = mkdtempSync(join(tmpdir(), "gitlab-rebase-e2e-"));
+const workDir = realpathSync(mkdtempSync(join(tmpdir(), "gitlab-rebase-e2e-")));
 const repoDir = join(workDir, repoName);
 
 let namespace = "";

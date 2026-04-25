@@ -107,10 +107,12 @@ export async function main(
     } already been merged to ${q(target)}. Will rebase ${willRebaseStr}.`,
   );
 
-  for (const { mr, commits } of mrsWithCommits) {
-    console.log(`!${mr.iid} ${mr.title}`);
-    for (const commit of commits) {
-      console.log(`  ${commit.short_id} ${commit.title}`);
+  if (argv.verbose) {
+    for (const { mr, commits } of mrsWithCommits) {
+      console.log(`!${mr.iid} ${mr.title}`);
+      for (const commit of commits) {
+        console.log(`  ${commit.short_id} ${commit.title}`);
+      }
     }
   }
 

@@ -1245,7 +1245,6 @@ test("exits with error when git rebase encounters conflicts", async () => {
   await Bun.write(join(repoPath, "conflict.txt"), "main content\n");
   await Bun.$`git add conflict.txt`.cwd(repoPath).quiet();
   await Bun.$`git commit -m "main adds conflict.txt"`.cwd(repoPath).quiet();
-  const mainSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
   // Create feature branch from before main's commit with conflicting change
   await Bun.$`git checkout -b feature HEAD~1`.cwd(repoPath).quiet();
   await Bun.write(join(repoPath, "conflict.txt"), "feature content\n");

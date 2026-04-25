@@ -24,8 +24,14 @@ const interactive = process.argv.includes("--interactive");
 
 async function waitForEnter(): Promise<void> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
+    const onSigint = () => {
+      rl.close();
+      reject(new Error("Interrupted"));
+    };
+    process.once("SIGINT", onSigint);
     rl.question("", () => {
+      process.removeListener("SIGINT", onSigint);
       rl.close();
       resolve();
     });

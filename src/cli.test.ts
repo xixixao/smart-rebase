@@ -16,6 +16,7 @@ let mockMRs: object[] = [];
 const mockCommits = new Map<number, object[]>();
 let lastRequestedProject = "";
 let mrPagesFetched = 0;
+let mockCommitsRequestCount = 0;
 let mockMRsError = false;
 let mockMRsStatusCode = 200;
 let mockCommitsErrorIid: number | null = null;
@@ -31,6 +32,7 @@ const mockGitLab = Bun.serve({
 
     const commitsMatch = pathname.match(/\/merge_requests\/(\d+)\/commits$/);
     if (commitsMatch) {
+      mockCommitsRequestCount++;
       const iid = parseInt(commitsMatch[1]!);
       if (mockCommitsErrorIid !== null && iid === mockCommitsErrorIid) {
         return new Response("Internal Server Error", { status: 500 });
@@ -40,7 +42,7 @@ const mockGitLab = Bun.serve({
     if (pathname.match(/\/merge_requests$/)) {
       mrPagesFetched++;
       if (mockMRsStatusCode !== 200) return new Response("Server Error", { status: mockMRsStatusCode });
-      if (mockMRsError) return Response.json([{ iid: "not-a-number", title: "Bad", merge_commit_sha: null, merged_at: null, updated_at: OLD }]);
+      if (mockMRsError) return Response.json([{ iid: "not-a-number", title: "Bad", target_branch: "main", merged_at: null, updated_at: OLD }]);
       const page = parseInt(url.searchParams.get("page") ?? "1");
       const perPage = parseInt(url.searchParams.get("per_page") ?? "50");
       return Response.json(mockMRs.slice((page - 1) * perPage, page * perPage));
@@ -56,10 +58,10 @@ let defaultMainShas: [string, string] = ["", ""];
 let defaultFeatureSha = "";
 
 beforeAll(async () => {
-  const { repoPath, mainCommitShas } = await makeRepoWithDivergedBranch();
+  const { repoPath, mainCommitShas, featureCommitSha } = await makeRepoWithDivergedBranch();
   defaultTestCwd = repoPath;
   defaultMainShas = mainCommitShas;
-  defaultFeatureSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
+  defaultFeatureSha = featureCommitSha;
 });
 
 afterAll(() => {
@@ -71,6 +73,7 @@ beforeEach(async () => {
   mockCommits.clear();
   lastRequestedProject = "";
   mrPagesFetched = 0;
+  mockCommitsRequestCount = 0;
   mockMRsError = false;
   mockMRsStatusCode = 200;
   mockCommitsErrorIid = null;
@@ -408,23 +411,24 @@ test("accepts token with surrounding whitespace", async () => {
 // --- MR fetching tests ---
 
 test("prints merged MRs with their commits", async () => {
+  const { repoPath, mergedShas } = await makeRepoWithMergedAndNewFeature(2);
   mockMRs = [
-    { iid: 1, title: "Add feature", merge_commit_sha: defaultMainShas[0], merged_at: RECENT, updated_at: RECENT },
-    { iid: 2, title: "Fix bug", merge_commit_sha: defaultMainShas[1], merged_at: RECENT, updated_at: RECENT },
+    { iid: 1, title: "Add feature", target_branch: "main", merged_at: RECENT, updated_at: RECENT },
+    { iid: 2, title: "Fix bug", target_branch: "main", merged_at: RECENT, updated_at: RECENT },
   ];
-  mockCommits.set(1, [{ id: defaultMainShas[0], short_id: "sha1ful", title: "Implement feature" }]);
+  mockCommits.set(1, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "Implement feature" }]);
   mockCommits.set(2, [
-    { id: defaultMainShas[1], short_id: "sha2ful", title: "Fix the bug" },
-    { id: defaultMainShas[1], short_id: "sha3ful", title: "Add test for fix" },
+    { id: mergedShas[1]!, short_id: mergedShas[1]!.slice(0, 8), title: "Fix the bug" },
+    { id: mergedShas[1]!, short_id: mergedShas[1]!.slice(0, 8), title: "Add test for fix" },
   ]);
 
-  const { stdout, exitCode } = await run(["--verbose"]);
+  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
   expect(stdout).toContain("!1 Add feature");
-  expect(stdout).toContain("sha1ful Implement feature");
+  expect(stdout).toContain(`${mergedShas[0]!.slice(0, 8)} Implement feature`);
   expect(stdout).toContain("!2 Fix bug");
-  expect(stdout).toContain("sha2ful Fix the bug");
-  expect(stdout).toContain("sha3ful Add test for fix");
+  expect(stdout).toContain(`${mergedShas[1]!.slice(0, 8)} Fix the bug`);
+  expect(stdout).toContain(`${mergedShas[1]!.slice(0, 8)} Add test for fix`);
 });
 
 test("outputs only the rebase summary when there are no merged MRs", async () => {
@@ -437,20 +441,17 @@ test("outputs only the rebase summary when there are no merged MRs", async () =>
 });
 
 test("fetches commits for all MRs", async () => {
+  // MRs target a different branch so they don't affect rebase, but commits
+  // are still fetched for every MR returned by the API (for caching purposes).
   mockMRs = [
-    { iid: 10, title: "MR ten", merge_commit_sha: null, merged_at: RECENT, updated_at: RECENT },
-    { iid: 20, title: "MR twenty", merge_commit_sha: null, merged_at: RECENT, updated_at: RECENT },
-    { iid: 30, title: "MR thirty", merge_commit_sha: null, merged_at: RECENT, updated_at: RECENT },
+    { iid: 10, title: "MR ten", target_branch: "other", merged_at: RECENT, updated_at: RECENT },
+    { iid: 20, title: "MR twenty", target_branch: "other", merged_at: RECENT, updated_at: RECENT },
+    { iid: 30, title: "MR thirty", target_branch: "other", merged_at: RECENT, updated_at: RECENT },
   ];
-  mockCommits.set(10, [{ id: defaultMainShas[0], short_id: "c10", title: "Commit 10" }]);
-  mockCommits.set(20, [{ id: defaultMainShas[0], short_id: "c20", title: "Commit 20" }]);
-  mockCommits.set(30, [{ id: defaultMainShas[0], short_id: "c30", title: "Commit 30" }]);
 
-  const { stdout, exitCode } = await run(["--verbose"]);
+  const { exitCode } = await run([]);
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("Commit 10");
-  expect(stdout).toContain("Commit 20");
-  expect(stdout).toContain("Commit 30");
+  expect(mockCommitsRequestCount).toBe(3);
 });
 
 // --- project detection tests ---
@@ -466,33 +467,27 @@ test("exits with error when project cannot be determined", async () => {
 });
 
 test("detects project from origin remote", async () => {
-  const { repoPath, mainCommitShas } = await makeRepoWithDivergedBranch();
+  const { repoPath } = await makeRepoWithDivergedBranch();
   await Bun.$`git remote add origin git@gitlab.com:mygroup/myproject.git`.cwd(repoPath).quiet();
-  mockMRs = [{ iid: 5, title: "Origin MR", merge_commit_sha: mainCommitShas[0], merged_at: RECENT, updated_at: RECENT }];
-  mockCommits.set(5, []);
 
-  const { stdout, exitCode } = await run(["--verbose"], {
+  const { exitCode } = await run([], {
     cwd: repoPath,
     env: { GITLAB_PROJECT: undefined },
   });
   expect(exitCode).toBe(0);
   expect(lastRequestedProject).toBe("mygroup/myproject");
-  expect(stdout).toContain("!5 Origin MR");
 });
 
 test("detects project from the sole remote when it is not named origin", async () => {
-  const { repoPath, mainCommitShas } = await makeRepoWithDivergedBranch();
+  const { repoPath } = await makeRepoWithDivergedBranch();
   await Bun.$`git remote add upstream git@gitlab.com:org/upstream-project.git`.cwd(repoPath).quiet();
-  mockMRs = [{ iid: 6, title: "Upstream MR", merge_commit_sha: mainCommitShas[0], merged_at: RECENT, updated_at: RECENT }];
-  mockCommits.set(6, []);
 
-  const { stdout, exitCode } = await run(["--verbose"], {
+  const { exitCode } = await run([], {
     cwd: repoPath,
     env: { GITLAB_PROJECT: undefined },
   });
   expect(exitCode).toBe(0);
   expect(lastRequestedProject).toBe("org/upstream-project");
-  expect(stdout).toContain("!6 Upstream MR");
 });
 
 test("uses origin when both origin and another remote exist", async () => {
@@ -678,18 +673,19 @@ test("proceeds normally when .netrc file does not exist", async () => {
 // --- cache tests ---
 
 test("merges cached older MRs with fresh ones", async () => {
+  const { repoPath, mergedShas, headSha } = await makeRepoWithMergedAndNewFeature(2);
   const tmpDir = mkdtempSync("/tmp/gitlab-rebase-cache-test-");
 
-  mockMRs = [{ iid: 1, title: "Old MR", merge_commit_sha: defaultMainShas[0], merged_at: RECENT, updated_at: RECENT }];
-  mockCommits.set(1, []);
-  await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
+  mockMRs = [{ iid: 1, title: "Old MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(1, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "old commit" }]);
+  await run([], { cwd: repoPath, env: { GITLAB_CACHE_DIR: tmpDir } });
 
   // First run rebases the feature branch; reset it so the second run sees the same repo state.
-  await Bun.$`git reset --hard ${defaultFeatureSha}`.cwd(defaultTestCwd).quiet();
+  await Bun.$`git reset --hard ${headSha}`.cwd(repoPath).quiet();
 
-  mockMRs = [{ iid: 2, title: "New MR", merge_commit_sha: defaultMainShas[1], merged_at: RECENT, updated_at: RECENT }];
-  mockCommits.set(2, []);
-  const { stdout, exitCode } = await run(["--verbose"], { env: { GITLAB_CACHE_DIR: tmpDir } });
+  mockMRs = [{ iid: 2, title: "New MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(2, [{ id: mergedShas[1]!, short_id: mergedShas[1]!.slice(0, 8), title: "new commit" }]);
+  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath, env: { GITLAB_CACHE_DIR: tmpDir } });
 
   expect(exitCode).toBe(0);
   expect(stdout).toContain("!1 Old MR");
@@ -697,18 +693,19 @@ test("merges cached older MRs with fresh ones", async () => {
 });
 
 test("fresh data replaces cached version of same MR", async () => {
+  const { repoPath, mergedShas, headSha } = await makeRepoWithMergedAndNewFeature(1);
   const tmpDir = mkdtempSync("/tmp/gitlab-rebase-cache-test-");
 
-  mockMRs = [{ iid: 1, title: "Old title", merge_commit_sha: defaultMainShas[0], merged_at: RECENT, updated_at: RECENT }];
-  mockCommits.set(1, []);
-  await run([], { env: { GITLAB_CACHE_DIR: tmpDir } });
+  mockMRs = [{ iid: 1, title: "Old title", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(1, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "the commit" }]);
+  await run([], { cwd: repoPath, env: { GITLAB_CACHE_DIR: tmpDir } });
 
   // First run rebases the feature branch; reset it so the second run sees the same repo state.
-  await Bun.$`git reset --hard ${defaultFeatureSha}`.cwd(defaultTestCwd).quiet();
+  await Bun.$`git reset --hard ${headSha}`.cwd(repoPath).quiet();
 
-  mockMRs = [{ iid: 1, title: "Updated title", merge_commit_sha: defaultMainShas[0], merged_at: RECENT, updated_at: RECENT }];
-  mockCommits.set(1, []);
-  const { stdout, exitCode } = await run(["--verbose"], { env: { GITLAB_CACHE_DIR: tmpDir } });
+  mockMRs = [{ iid: 1, title: "Updated title", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(1, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "the commit" }]);
+  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath, env: { GITLAB_CACHE_DIR: tmpDir } });
 
   expect(exitCode).toBe(0);
   expect(stdout).toContain("Updated title");
@@ -744,8 +741,8 @@ test("exits with error when GitLab returns invalid MR format", async () => {
 });
 
 test("exits with error when commits API returns an error", async () => {
-  // Use a real SHA so the MR passes the filter and its commits are actually fetched.
-  mockMRs = [{ iid: 99, title: "Some MR", merge_commit_sha: defaultMainShas[0], merged_at: RECENT, updated_at: RECENT }];
+  // Commits are fetched for every MR returned by the API, regardless of filtering.
+  mockMRs = [{ iid: 99, title: "Some MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommitsErrorIid = 99;
 
   const { stderr, exitCode } = await run([]);
@@ -782,9 +779,8 @@ test("uses default cache directory when GITLAB_CACHE_DIR is not set", async () =
   expect(existsSync(join(homeDir, ".cache", "gitlab-rebase"))).toBe(true);
 });
 
-test("uses readline for stdin when no stdinLines are provided", async () => {
-  // GITLAB_TOKEN is set by default so no prompting happens;
-  // getDefaultStdinLines() is called but never read from
+test("exits when GITLAB_TOKEN is set and stdinLines are omitted", async () => {
+  // No token prompt → default readline is never opened; process must still exit.
   const { exitCode } = await run([], { omitStdin: true });
   expect(exitCode).toBe(0);
 });
@@ -819,11 +815,13 @@ test("handles corrupted cache file gracefully", async () => {
 async function makeRepoWithDivergedBranch(): Promise<{
   repoPath: string;
   mainCommitShas: [string, string];
+  featureCommitSha: string;
 }> {
   const repoPath = await makeGitRepo();
   // Create a feature branch from the initial commit
   await Bun.$`git checkout -b feature`.cwd(repoPath).quiet();
   await Bun.$`git commit --allow-empty -m "feature work"`.cwd(repoPath).quiet();
+  const featureCommitSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
   // Add two new commits on main (after feature branched off)
   await Bun.$`git checkout main`.cwd(repoPath).quiet();
   await Bun.$`git commit --allow-empty -m "landed on main 1"`.cwd(repoPath).quiet();
@@ -831,17 +829,40 @@ async function makeRepoWithDivergedBranch(): Promise<{
   await Bun.$`git commit --allow-empty -m "landed on main 2"`.cwd(repoPath).quiet();
   const sha2 = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
   await Bun.$`git checkout feature`.cwd(repoPath).quiet();
-  return { repoPath, mainCommitShas: [sha1, sha2] };
+  return { repoPath, mainCommitShas: [sha1, sha2], featureCommitSha };
+}
+
+// Feature branch with `mergedCount` commits (available for MR matching) plus
+// one trailing "new work" commit that remains after the rebase. Main has one
+// extra commit on top of the branch point so there is always a rebase target.
+async function makeRepoWithMergedAndNewFeature(mergedCount: number): Promise<{
+  repoPath: string;
+  mergedShas: string[];
+  headSha: string;
+}> {
+  const repoPath = await makeGitRepo();
+  await Bun.$`git checkout -b feature`.cwd(repoPath).quiet();
+  const mergedShas: string[] = [];
+  for (let i = 0; i < mergedCount; i++) {
+    await Bun.$`git commit --allow-empty -m "merged commit ${i + 1}"`.cwd(repoPath).quiet();
+    mergedShas.push((await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim());
+  }
+  await Bun.$`git commit --allow-empty -m "new work"`.cwd(repoPath).quiet();
+  const headSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
+  await Bun.$`git checkout main`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "landed on main"`.cwd(repoPath).quiet();
+  await Bun.$`git checkout feature`.cwd(repoPath).quiet();
+  return { repoPath, mergedShas, headSha };
 }
 
 test("defaults target branch to main", async () => {
-  const { repoPath, mainCommitShas } = await makeRepoWithDivergedBranch();
+  const { repoPath, mergedShas } = await makeRepoWithMergedAndNewFeature(1);
   mockMRs = [
-    { iid: 1, title: "MR on main", merge_commit_sha: mainCommitShas[0], merged_at: RECENT, updated_at: RECENT },
-    { iid: 2, title: "Unrelated MR", merge_commit_sha: "0".repeat(40), merged_at: RECENT, updated_at: RECENT },
+    { iid: 1, title: "MR on main", target_branch: "main", merged_at: RECENT, updated_at: RECENT },
+    { iid: 2, title: "Unrelated MR", target_branch: "release", merged_at: RECENT, updated_at: RECENT },
   ];
-  mockCommits.set(1, []);
-  mockCommits.set(2, []);
+  mockCommits.set(1, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "feature work" }]);
+  mockCommits.set(2, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "feature work" }]);
 
   const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
@@ -853,34 +874,35 @@ test("accepts custom target branch as positional arg", async () => {
   // feature branches off main (initial commit); release adds a commit after
   const repoPath = await makeGitRepo();
   await Bun.$`git checkout -b feature`.cwd(repoPath).quiet();
-  await Bun.$`git commit --allow-empty -m "feature work"`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "merged feature work"`.cwd(repoPath).quiet();
+  const mergedSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
+  await Bun.$`git commit --allow-empty -m "new work"`.cwd(repoPath).quiet();
   await Bun.$`git checkout -b release main`.cwd(repoPath).quiet();
   await Bun.$`git commit --allow-empty -m "release commit"`.cwd(repoPath).quiet();
-  const releaseSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
   await Bun.$`git checkout feature`.cwd(repoPath).quiet();
 
-  mockMRs = [{ iid: 5, title: "Release MR", merge_commit_sha: releaseSha, merged_at: RECENT, updated_at: RECENT }];
-  mockCommits.set(5, []);
+  mockMRs = [{ iid: 5, title: "Release MR", target_branch: "release", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(5, [{ id: mergedSha, short_id: mergedSha.slice(0, 8), title: "merged feature work" }]);
 
   const { stdout, exitCode } = await run(["release", "--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
   expect(stdout).toContain("!5 Release MR");
 });
 
-test("includes MR matched by individual commit sha when merge_commit_sha is null", async () => {
-  const { repoPath, mainCommitShas } = await makeRepoWithDivergedBranch();
-  mockMRs = [{ iid: 3, title: "Squash MR", merge_commit_sha: null, merged_at: RECENT, updated_at: RECENT }];
-  mockCommits.set(3, [{ id: mainCommitShas[0], short_id: mainCommitShas[0].slice(0, 8), title: "squashed" }]);
+test("includes MR whose commit appears in the current branch", async () => {
+  const { repoPath, mergedShas } = await makeRepoWithMergedAndNewFeature(1);
+  mockMRs = [{ iid: 3, title: "Squash MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(3, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "squashed" }]);
 
   const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
   expect(stdout).toContain("!3 Squash MR");
 });
 
-test("excludes MRs whose commits are not in target since base", async () => {
+test("excludes MRs whose commits do not appear in the current branch", async () => {
   const { repoPath } = await makeRepoWithDivergedBranch();
-  mockMRs = [{ iid: 9, title: "Old MR", merge_commit_sha: "0".repeat(40), merged_at: RECENT, updated_at: RECENT }];
-  mockCommits.set(9, [{ id: "a".repeat(40), short_id: "aaaaaaaa", title: "old commit" }]);
+  mockMRs = [{ iid: 9, title: "Old MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(9, [{ id: "a".repeat(40), short_id: "aaaaaaaa", title: "unrelated commit" }]);
 
   const { stdout, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).toBe(0);
@@ -888,10 +910,10 @@ test("excludes MRs whose commits are not in target since base", async () => {
 });
 
 test("excludes MRs where merged_at is before base commit date", async () => {
-  const { repoPath, mainCommitShas } = await makeRepoWithDivergedBranch();
-  // SHA is in target, but merged_at is before base → should be excluded
-  mockMRs = [{ iid: 4, title: "Old merged MR", merge_commit_sha: mainCommitShas[0], merged_at: OLD, updated_at: OLD }];
-  mockCommits.set(4, []);
+  const { repoPath, featureCommitSha } = await makeRepoWithDivergedBranch();
+  // Commit is in the current branch, but merged_at is before base → should be excluded.
+  mockMRs = [{ iid: 4, title: "Old merged MR", target_branch: "main", merged_at: OLD, updated_at: OLD }];
+  mockCommits.set(4, [{ id: featureCommitSha, short_id: featureCommitSha.slice(0, 8), title: "feature work" }]);
 
   const { stdout, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).toBe(0);
@@ -907,10 +929,9 @@ test("exits with error when branch has no commits ahead of target", async () => 
 });
 
 test("exits with error when all commits have already been merged", async () => {
-  const { repoPath, mainCommitShas } = await makeRepoWithDivergedBranch();
-  const featureSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
-  mockMRs = [{ iid: 1, title: "Feature MR", merge_commit_sha: mainCommitShas[0], merged_at: RECENT, updated_at: RECENT }];
-  mockCommits.set(1, [{ id: featureSha, short_id: featureSha.slice(0, 8), title: "feature work" }]);
+  const { repoPath, featureCommitSha } = await makeRepoWithDivergedBranch();
+  mockMRs = [{ iid: 1, title: "Feature MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(1, [{ id: featureCommitSha, short_id: featureCommitSha.slice(0, 8), title: "feature work" }]);
 
   const { stderr, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).not.toBe(0);
@@ -929,7 +950,7 @@ test("exits with error when target branch does not exist", async () => {
 
 test("stops fetching when first page MRs are older than base commit date", async () => {
   mockMRs = [
-    { iid: 1, title: "Old MR", merge_commit_sha: defaultMainShas[0], merged_at: OLD, updated_at: OLD },
+    { iid: 1, title: "Old MR", target_branch: "main", merged_at: OLD, updated_at: OLD },
   ];
   mockCommits.set(1, []);
 
@@ -940,17 +961,15 @@ test("stops fetching when first page MRs are older than base commit date", async
 
 test("paginates to fetch MRs until updated_at falls before base commit date", async () => {
   mockMRs = [
-    { iid: 2, title: "Recent MR", merge_commit_sha: defaultMainShas[0], merged_at: RECENT, updated_at: RECENT },
-    { iid: 1, title: "Old MR", merge_commit_sha: defaultMainShas[0], merged_at: OLD, updated_at: OLD },
+    { iid: 2, title: "Recent MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT },
+    { iid: 1, title: "Old MR", target_branch: "main", merged_at: OLD, updated_at: OLD },
   ];
   mockCommits.set(2, []);
   mockCommits.set(1, []);
 
-  const { stdout, exitCode } = await run(["--verbose"], { env: { GITLAB_PER_PAGE: "1" } });
+  const { exitCode } = await run([], { env: { GITLAB_PER_PAGE: "1" } });
   expect(exitCode).toBe(0);
   expect(mrPagesFetched).toBe(2);
-  expect(stdout).toContain("!2 Recent MR");
-  expect(stdout).not.toContain("!1 Old MR");
 });
 
 // --- target branch update tests ---
@@ -1201,8 +1220,7 @@ test("skips already-merged commits and rebases only the remaining ones", async (
   const mainSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
   await Bun.$`git checkout feature`.cwd(repoPath).quiet();
 
-  // MR whose merge_commit_sha is on main, and whose commits include the first feature commit.
-  mockMRs = [{ iid: 1, title: "Merged MR", merge_commit_sha: mainSha, merged_at: RECENT, updated_at: RECENT }];
+  mockMRs = [{ iid: 1, title: "Merged MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, [{ id: mergedSha, short_id: mergedSha.slice(0, 8), title: "merged commit" }]);
 
   const { stdout, stderr, exitCode } = await run(["--verbose"], { cwd: repoPath });
@@ -1234,7 +1252,7 @@ test("exits with error when git rebase encounters conflicts", async () => {
   await Bun.$`git add conflict.txt`.cwd(repoPath).quiet();
   await Bun.$`git commit -m "feature adds conflict.txt"`.cwd(repoPath).quiet();
 
-  mockMRs = [{ iid: 1, title: "Conflict MR", merge_commit_sha: mainSha, merged_at: RECENT, updated_at: RECENT }];
+  mockMRs = [{ iid: 1, title: "Conflict MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, []);
 
   const { stderr, exitCode } = await run([], { cwd: repoPath });

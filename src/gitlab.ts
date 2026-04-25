@@ -3,7 +3,7 @@ import { type } from "arktype";
 const MergeRequest = type({
   iid: "number",
   title: "string",
-  merge_commit_sha: "string | null",
+  target_branch: "string",
   merged_at: "string | null",
   updated_at: "string",
 });

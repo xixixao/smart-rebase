@@ -39,14 +39,14 @@ export async function main(
   const projectId = await getProjectId(cwd);
 
   const baseSha = await getBaseSha(cwd, target);
-  const [baseDate, targetShas, currentBranch, currentBranchShas, cached] =
+  const [baseDate, currentBranch, currentBranchShas, cached] =
     await Promise.all([
       getBaseCommitDate(cwd, baseSha),
-      getTargetShas(cwd, baseSha, target),
       getCurrentBranch(cwd),
       getCurrentBranchShas(cwd, baseSha),
       readCache(gitlabUrl, projectId),
     ]);
+  const currentBranchShaSet = new Set(currentBranchShas);
 
   const fresh = await fetchMergedMRsSince({
     baseUrl: gitlabUrl,
@@ -66,9 +66,9 @@ export async function main(
   const mrsWithCommits = allMrs.filter(
     ({ mr, commits }) =>
       mr.merged_at !== null &&
+      mr.target_branch === target &&
       new Date(mr.merged_at) >= sinceDate &&
-      ((mr.merge_commit_sha !== null && targetShas.has(mr.merge_commit_sha)) ||
-        commits.some((c) => targetShas.has(c.id))),
+      commits.some((c) => currentBranchShaSet.has(c.id)),
   );
 
   if (currentBranchShas.length === 0) {
@@ -303,25 +303,6 @@ async function getBaseCommitDate(
   ).trim();
 }
 
-async function getTargetShas(
-  cwd: string,
-  baseSha: string,
-  target: string,
-): Promise<Set<string>> {
-  const out = (
-    await Bun.$`git log ${baseSha}..${target} --format=%H`
-      .cwd(cwd)
-      .quiet()
-      .text()
-  ).trim();
-  if (!out) return new Set();
-  return new Set(
-    out
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
-}
 
 async function getCurrentBranch(cwd: string): Promise<string> {
   return (

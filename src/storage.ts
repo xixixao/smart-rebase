@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { MRWithCommits } from "./gitlab";
 
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 
 const CachedCommit = type({
   id: "string",
@@ -14,7 +14,7 @@ const CachedCommit = type({
 const CachedMR = type({
   iid: "number",
   title: "string",
-  merge_commit_sha: "string | null",
+  target_branch: "string",
   merged_at: "string | null",
   updated_at: "string",
 });

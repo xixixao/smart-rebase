@@ -10,12 +10,13 @@ export async function main(
   args: string[],
   opts: {
     cwd?: string;
-    stdinLines?: AsyncIterator<string>;
     stdin?: NodeJS.ReadableStream;
   } = {},
 ): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const argv = (await createCli(args).parseAsync()) as Argv;
+
+  const auth = await getAuth(opts.stdin);
 
   await ensureGitRepo(cwd);
   await checkAndStashDirtyChanges(cwd, opts.stdin);
@@ -32,8 +33,6 @@ export async function main(
   }
 
   await checkAndUpdateTargetBranch(cwd, target, opts.stdin);
-
-  const auth = await getAuth(opts.stdinLines);
 
   const gitlabUrl = process.env.GITLAB_URL ?? "https://gitlab.com";
   const projectId = await getProjectId(cwd);
@@ -121,7 +120,9 @@ export async function main(
   if (branchBeforeRebase !== target) {
     // Find the oldest non-merged commit; everything from its parent onward gets rebased.
     const reversedShas = [...currentBranchShas].reverse();
-    const firstNonMergedIdx = reversedShas.findIndex((sha) => !mergedCommitIds.has(sha));
+    const firstNonMergedIdx = reversedShas.findIndex(
+      (sha) => !mergedCommitIds.has(sha),
+    );
     const rebaseUpstream =
       firstNonMergedIdx === 0 ? baseSha : reversedShas[firstNonMergedIdx - 1]!;
 
@@ -302,7 +303,6 @@ async function getBaseCommitDate(
     await Bun.$`git log -1 --format=%cI ${baseSha}`.cwd(cwd).quiet().text()
   ).trim();
 }
-
 
 async function getCurrentBranch(cwd: string): Promise<string> {
   return (

@@ -1,36 +1,15 @@
 import { type } from "arktype";
-import { createInterface, type Interface } from "node:readline";
 import { join, dirname } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { openBrowser } from "./manual/openBrowser";
+import { textInputPrompt, withProgress } from "./manual/prompt";
+import { q } from "./format";
 
 export const GITLAB_TOKEN_URL =
   "https://gitlab.com/-/user_settings/personal_access_tokens?name=gitlab-rebase&scopes=api";
 
 export interface GitLabAuth {
   token: string;
-}
-
-let _defaultStdinLines: AsyncIterator<string> | undefined;
-let _defaultStdinRl: Interface | undefined;
-
-function closeDefaultStdinLines(): void {
-  _defaultStdinRl?.close();
-  _defaultStdinRl = undefined;
-  _defaultStdinLines = undefined;
-}
-
-export function getDefaultStdinLines(): AsyncIterator<string> {
-  if (!_defaultStdinLines) {
-    const rl = createInterface({
-      input: process.stdin,
-      output: process.stderr,
-      terminal: false,
-    });
-    _defaultStdinRl = rl;
-    _defaultStdinLines = rl[Symbol.asyncIterator]();
-  }
-  return _defaultStdinLines;
 }
 
 function getSettingsPath(): string {
@@ -50,6 +29,7 @@ const SettingsSchema = type({ "token?": "string" });
 
 async function loadSettings(): Promise<Partial<GitLabAuth>> {
   const file = Bun.file(getSettingsPath());
+  
   if (!(await file.exists())) return {};
   try {
     const data = SettingsSchema(await file.json());
@@ -103,49 +83,41 @@ async function loadNetrc(machine: string): Promise<string | undefined> {
   return undefined;
 }
 
-export async function getAuth(stdinLines?: AsyncIterator<string>): Promise<GitLabAuth> {
-  try {
-    async function prompt(question: string): Promise<string> {
-      process.stderr.write(question);
-      const lines = stdinLines ?? getDefaultStdinLines();
-      const result = await lines.next();
-      return result.done ? "" : result.value.trim();
-    }
+export async function getAuth(stdin?: NodeJS.ReadableStream): Promise<GitLabAuth> {
+  const saved = await loadSettings();
 
-    const saved = await loadSettings();
+  let token = process.env.GITLAB_TOKEN;
 
-    let token = process.env.GITLAB_TOKEN;
+  if (!token) {
+    const gitlabUrl = process.env.GITLAB_URL ?? "https://gitlab.com";
+    const machine = new URL(gitlabUrl).hostname;
+    token = await loadNetrc(machine);
+  }
 
-    if (!token) {
-      const gitlabUrl = process.env.GITLAB_URL ?? "https://gitlab.com";
-      const machine = new URL(gitlabUrl).hostname;
-      token = await loadNetrc(machine);
-    }
+  if (!token) {
+    token = saved.token;
+  }
 
-    if (!token) {
-      token = saved.token;
-    }
-
-    if (!token) {
-      process.stderr.write("GITLAB_TOKEN is not set.\n");
-      process.stderr.write(
-        `Create a personal access token with 'api' scope at:\n  ${GITLAB_TOKEN_URL}\n\n`,
-      );
-      token = await prompt("Press Enter to open in your browser, or paste your token: ");
-      if (token === "") {
+  if (!token) {
+    process.stderr.write(`Environment variable ${q("GITLAB_TOKEN")} is not set.\n`);
+    process.stderr.write(
+      `Create a personal access token with ${q("api")} scope at:\n  ${q(GITLAB_TOKEN_URL)}\n\n`,
+    );
+    token = await textInputPrompt(
+      `Press ${q("Enter")} to open in your browser, or paste your token: `,
+      stdin,
+    );
+    if (token === "") {
+      await withProgress("Opening browser...", async () => {
         await openBrowser(GITLAB_TOKEN_URL);
-        token = await prompt("Enter your GitLab API token: ");
-      }
-      const savedPath = await saveSettings({ token });
-      if (savedPath) {
-        process.stderr.write(`Credentials saved to ${savedPath}\n`);
-      }
+      });
+      token = await textInputPrompt("Enter your GitLab API token: ", stdin);
     }
-
-    return { token };
-  } finally {
-    if (stdinLines === undefined) {
-      closeDefaultStdinLines();
+    const savedPath = await saveSettings({ token });
+    if (savedPath) {
+      process.stderr.write(`GitLab token saved to ${savedPath}\n`);
     }
   }
+
+  return { token };
 }

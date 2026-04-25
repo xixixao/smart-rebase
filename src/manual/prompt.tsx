@@ -1,5 +1,7 @@
 import { render, Text, Box } from "ink";
 import SelectInput from "ink-select-input";
+import TextInput from "ink-text-input";
+import { useState } from "react";
 import type { FC } from "react";
 
 interface Item {
@@ -68,6 +70,36 @@ export async function withProgress(
     clear();
     unmount();
   }
+}
+
+export async function textInputPrompt(
+  label: string,
+  stdin: NodeJS.ReadableStream = process.stdin as NodeJS.ReadableStream,
+): Promise<string> {
+  return new Promise<string>((resolve) => {
+    function App() {
+      const [value, setValue] = useState("");
+      return (
+        <Box>
+          <Text>{label}</Text>
+          <TextInput
+            value={value}
+            onChange={setValue}
+            onSubmit={(val) => {
+              clear();
+              unmount();
+              resolve(val.trim());
+            }}
+          />
+        </Box>
+      );
+    }
+
+    const { unmount, clear } = render(<App />, {
+      stdout: process.stderr as NodeJS.WriteStream,
+      stdin: stdin as NodeJS.ReadStream,
+    });
+  });
 }
 
 export async function selectPrompt(

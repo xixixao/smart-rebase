@@ -166,10 +166,8 @@ async function run(
   args: string[],
   opts: {
     env?: Record<string, string | undefined>;
-    stdin?: string;
     inkStdin?: string;
     cwd?: string;
-    omitStdin?: boolean;
     platform?: NodeJS.Platform;
     stdoutIsTTY?: boolean;
   } = {}
@@ -197,7 +195,6 @@ async function run(
     }
   }
 
-  const stdinLines = makeStdinIterator(opts.stdin ?? "");
   const inkStream = makeInkStdinStream(opts.inkStdin ?? "");
 
   let stdoutBuffer = "";
@@ -225,7 +222,6 @@ async function run(
   try {
     await main(args, {
       cwd: opts.cwd ?? defaultTestCwd,
-      ...(opts.omitStdin ? {} : { stdinLines }),
       stdin: inkStream as unknown as NodeJS.ReadableStream,
     });
   } catch (e: unknown) {
@@ -250,17 +246,6 @@ async function run(
   return { stdout: stripAnsi(stdoutBuffer), stderr: stripAnsi(stderrBuffer), exitCode };
 }
 
-function makeStdinIterator(input: string): AsyncIterator<string> {
-  const lines = input.split("\n");
-  if (lines.at(-1) === "") lines.pop();
-  let i = 0;
-  return {
-    async next() {
-      if (i < lines.length) return { value: lines[i++]!, done: false as const };
-      return { value: "" as string, done: true as const };
-    },
-  };
-}
 
 async function makeBrowserScript(): Promise<{ browserScript: string; browserLog: string }> {
   const tmpDir = mkdtempSync("/tmp/gitlab-rebase-test-");
@@ -355,7 +340,7 @@ test("runs without auth prompts when env vars are set", async () => {
 test("prompts for token when GITLAB_TOKEN is not set", async () => {
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined },
-    stdin: "mytoken\n",
+    inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
   expect(stderr).toContain("GITLAB_TOKEN");
@@ -365,7 +350,7 @@ test("prompts for token when GITLAB_TOKEN is not set", async () => {
 test("token prompt shows GitLab URL with api scope", async () => {
   const { stderr } = await run([], {
     env: { GITLAB_TOKEN: undefined },
-    stdin: "mytoken\n",
+    inkStdin: "mytoken\r",
   });
   expect(stderr).toContain(GITLAB_TOKEN_URL);
 });
@@ -374,7 +359,7 @@ test("opens browser when user presses Enter on token prompt", async () => {
   const { browserScript, browserLog } = await makeBrowserScript();
   const { exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined, BROWSER: browserScript },
-    stdin: "\nmyfinaltoken\n",
+    inkStdin: "\rmyfinaltoken\r",
   });
   expect(exitCode).toBe(0);
   const openedUrl = await Bun.file(browserLog).text();
@@ -384,7 +369,7 @@ test("opens browser when user presses Enter on token prompt", async () => {
 test("continues normally when browser command fails to launch", async () => {
   const { exitCode, stderr } = await run([], {
     env: { GITLAB_TOKEN: undefined, BROWSER: "false" },
-    stdin: "\nmytoken\n",
+    inkStdin: "\rmytoken\r",
   });
   expect(exitCode).toBe(0);
   expect(stderr).toContain("Enter your GitLab API token");
@@ -394,7 +379,7 @@ test("does not open browser when token is pasted directly", async () => {
   const { browserScript, browserLog } = await makeBrowserScript();
   const { exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined, BROWSER: browserScript },
-    stdin: "pastedtoken\n",
+    inkStdin: "pastedtoken\r",
   });
   expect(exitCode).toBe(0);
   expect(existsSync(browserLog)).toBe(false);
@@ -403,7 +388,7 @@ test("does not open browser when token is pasted directly", async () => {
 test("accepts token with surrounding whitespace", async () => {
   const { exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined },
-    stdin: "  mytoken  \n",
+    inkStdin: "  mytoken  \r",
   });
   expect(exitCode).toBe(0);
 });
@@ -522,10 +507,10 @@ test("errors when multiple remotes exist and none is named origin", async () => 
 test("saves credentials to settings file when prompted and prints the path", async () => {
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined },
-    stdin: "mytoken\n",
+    inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
-  expect(stderr).toContain("Credentials saved to");
+  expect(stderr).toContain("GitLab token saved to");
   expect(stderr).toContain(testConfigDir);
   const creds = await Bun.file(testCredsFile).json();
   expect(creds.token).toBe("mytoken");
@@ -539,7 +524,7 @@ test("loads credentials from settings file when env vars are not set", async () 
     env: { GITLAB_TOKEN: undefined },
   });
   expect(exitCode).toBe(0);
-  expect(stderr).not.toContain("GITLAB_TOKEN is not set");
+  expect(stderr).not.toContain("GITLAB_TOKEN` is not set");
 });
 
 test("saves credentials to macOS Library path when on darwin", async () => {
@@ -547,7 +532,7 @@ test("saves credentials to macOS Library path when on darwin", async () => {
   const { exitCode } = await run([], {
     platform: "darwin",
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome, XDG_CONFIG_HOME: undefined },
-    stdin: "mytoken\n",
+    inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
   expect(existsSync(join(tmpHome, "Library", "Application Support", "gitlab-rebase", "credentials.json"))).toBe(true);
@@ -558,7 +543,7 @@ test("saves credentials to APPDATA path when on win32", async () => {
   const { exitCode } = await run([], {
     platform: "win32",
     env: { GITLAB_TOKEN: undefined, APPDATA: tmpAppData, XDG_CONFIG_HOME: undefined },
-    stdin: "mytoken\n",
+    inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
   expect(existsSync(join(tmpAppData, "gitlab-rebase", "credentials.json"))).toBe(true);
@@ -569,7 +554,7 @@ test("saves credentials to XDG_CONFIG_HOME path when on linux", async () => {
   const { exitCode } = await run([], {
     platform: "linux",
     env: { GITLAB_TOKEN: undefined, XDG_CONFIG_HOME: tmpXdg },
-    stdin: "mytoken\n",
+    inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
   expect(existsSync(join(tmpXdg, "gitlab-rebase", "credentials.json"))).toBe(true);
@@ -583,8 +568,8 @@ test("env var takes precedence over saved credentials", async () => {
     env: { GITLAB_TOKEN: "envtoken" },
   });
   expect(exitCode).toBe(0);
-  expect(stderr).not.toContain("GITLAB_TOKEN is not set");
-  expect(stderr).not.toContain("Credentials saved");
+  expect(stderr).not.toContain("GITLAB_TOKEN` is not set");
+  expect(stderr).not.toContain("GitLab token saved");
 });
 
 // --- .netrc tests ---
@@ -599,7 +584,7 @@ test("reads token from .netrc matching the GITLAB_URL hostname", async () => {
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome },
   });
   expect(exitCode).toBe(0);
-  expect(stderr).not.toContain("GITLAB_TOKEN is not set");
+  expect(stderr).not.toContain("GITLAB_TOKEN` is not set");
 });
 
 test("env var takes precedence over .netrc token", async () => {
@@ -612,8 +597,8 @@ test("env var takes precedence over .netrc token", async () => {
     env: { GITLAB_TOKEN: "envtoken", HOME: tmpHome },
   });
   expect(exitCode).toBe(0);
-  expect(stderr).not.toContain("GITLAB_TOKEN is not set");
-  expect(stderr).not.toContain("Credentials saved");
+  expect(stderr).not.toContain("GITLAB_TOKEN` is not set");
+  expect(stderr).not.toContain("GitLab token saved");
 });
 
 test(".netrc takes precedence over saved credentials", async () => {
@@ -628,8 +613,8 @@ test(".netrc takes precedence over saved credentials", async () => {
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome },
   });
   expect(exitCode).toBe(0);
-  expect(stderr).not.toContain("GITLAB_TOKEN is not set");
-  expect(stderr).not.toContain("Credentials saved");
+  expect(stderr).not.toContain("GITLAB_TOKEN` is not set");
+  expect(stderr).not.toContain("GitLab token saved");
 });
 
 test("prompts when .netrc does not contain a matching machine entry", async () => {
@@ -640,10 +625,10 @@ test("prompts when .netrc does not contain a matching machine entry", async () =
   );
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome },
-    stdin: "mytoken\n",
+    inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
-  expect(stderr).toContain("GITLAB_TOKEN is not set");
+  expect(stderr).toContain("GITLAB_TOKEN` is not set");
 });
 
 test("prompts when .netrc machine entry has no password field", async () => {
@@ -654,20 +639,20 @@ test("prompts when .netrc machine entry has no password field", async () => {
   );
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome },
-    stdin: "mytoken\n",
+    inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
-  expect(stderr).toContain("GITLAB_TOKEN is not set");
+  expect(stderr).toContain("GITLAB_TOKEN` is not set");
 });
 
 test("proceeds normally when .netrc file does not exist", async () => {
   const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome },
-    stdin: "mytoken\n",
+    inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
-  expect(stderr).toContain("GITLAB_TOKEN is not set");
+  expect(stderr).toContain("GITLAB_TOKEN` is not set");
 });
 
 // --- cache tests ---
@@ -720,10 +705,10 @@ test("handles invalid JSON in credentials file by prompting again", async () => 
 
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined },
-    stdin: "mytoken\n",
+    inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
-  expect(stderr).toContain("GITLAB_TOKEN is not set");
+  expect(stderr).toContain("GITLAB_TOKEN` is not set");
 });
 
 test("exits with error when MRs API returns non-OK HTTP status", async () => {
@@ -779,9 +764,8 @@ test("uses default cache directory when GITLAB_CACHE_DIR is not set", async () =
   expect(existsSync(join(homeDir, ".cache", "gitlab-rebase"))).toBe(true);
 });
 
-test("exits when GITLAB_TOKEN is set and stdinLines are omitted", async () => {
-  // No token prompt → default readline is never opened; process must still exit.
-  const { exitCode } = await run([], { omitStdin: true });
+test("exits normally when GITLAB_TOKEN is set without needing stdin input", async () => {
+  const { exitCode } = await run([]);
   expect(exitCode).toBe(0);
 });
 
@@ -795,10 +779,10 @@ test("proceeds gracefully when credentials cannot be saved", async () => {
       GITLAB_TOKEN: undefined,
       XDG_CONFIG_HOME: blockingBase,
     },
-    stdin: "mytoken\n",
+    inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
-  expect(stderr).not.toContain("Credentials saved");
+  expect(stderr).not.toContain("GitLab token saved");
 });
 
 test("handles corrupted cache file gracefully", async () => {

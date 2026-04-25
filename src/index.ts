@@ -22,11 +22,7 @@ export async function main(
 
   await checkAndStashDirtyChanges(cwd, opts.stdin);
 
-  const target = argv.target ?? "main";
-
-  if (!argv.target) {
-    console.log(`Rebasing onto branch ${q("main")}.`);
-  }
+  const target = determineTargetBranch(argv.target);
 
   await checkAndUpdateTargetBranch(cwd, target, opts.stdin);
 
@@ -350,3 +346,12 @@ async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {
     await Bun.$`git remote get-url ${remoteName}`.cwd(cwd).quiet().text()
   ).trim();
 }
+
+function determineTargetBranch(target?: string): string {
+  if (!target) {
+    console.log(`Rebasing onto branch ${q("main")}.`);
+    return "main";
+  }
+  return target;
+}
+

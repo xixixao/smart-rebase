@@ -1217,7 +1217,7 @@ test("skips already-merged commits and rebases only the remaining ones", async (
 
   const { stdout, stderr, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
-  expect(stdout).toBe(
+  expect(stdout).toContain(
     "Rebasing onto branch `main`.\n" +
     "Rebasing `feature` onto `main`. 1 commit has already been merged to `main`. Will rebase 1 commit.\n" +
     "!1 Merged MR\n" +

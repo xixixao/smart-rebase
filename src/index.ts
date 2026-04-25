@@ -18,13 +18,8 @@ export async function main(
   
   const auth = await getAuth(opts.stdin);
   
-  await ensureGitRepo(cwd);
-  
-  if (argv.verbose) {
-    const headSha = await Bun.$`git rev-parse --short HEAD`.cwd(cwd).text();
-    console.log(`Current commit: ${q(headSha.trim())}`);
-  }
-  
+  await ensureGitRepo(cwd, argv.verbose);
+
   await checkAndStashDirtyChanges(cwd, opts.stdin);
 
   const target = argv.target ?? "main";
@@ -270,9 +265,17 @@ async function getProjectId(cwd: string): Promise<string> {
   );
 }
 
-async function ensureGitRepo(cwd: string): Promise<void> {
+async function ensureGitRepo(
+  cwd: string,
+  verbose: boolean,
+): Promise<void> {
   try {
-    await Bun.$`git rev-parse --git-dir`.cwd(cwd).quiet();
+    const headShort = (
+      await Bun.$`git rev-parse --short HEAD`.cwd(cwd).quiet().text()
+    ).trim();
+    if (verbose) {
+      console.log(`Current commit: ${q(headShort)}`);
+    }
   } catch {
     throw new Error(
       `Not a Git repository. ${q(

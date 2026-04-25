@@ -15,21 +15,22 @@ export async function main(
 ): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const argv = (await createCli(args).parseAsync()) as Argv;
-
+  
   const auth = await getAuth(opts.stdin);
-
+  
   await ensureGitRepo(cwd);
+  
+  if (argv.verbose) {
+    const headSha = await Bun.$`git rev-parse --short HEAD`.cwd(cwd).text();
+    console.log(`Current commit: ${q(headSha.trim())}`);
+  }
+  
   await checkAndStashDirtyChanges(cwd, opts.stdin);
 
   const target = argv.target ?? "main";
 
   if (!argv.target) {
     console.log(`Rebasing onto branch ${q("main")}.`);
-  }
-
-  if (argv.sha) {
-    const headSha = await Bun.$`git rev-parse --short HEAD`.cwd(cwd).text();
-    console.log(headSha.trim());
   }
 
   await checkAndUpdateTargetBranch(cwd, target, opts.stdin);

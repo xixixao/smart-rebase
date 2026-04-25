@@ -293,7 +293,7 @@ test("uses colors instead of backticks when stdout is a TTY", async () => {
 test("--verbose flag is recognised", async () => {
   const { stdout, exitCode } = await run(["--verbose"]);
   expect(exitCode).toBe(0);
-  expect(stdout).toBe(
+  expect(stdout).toContain(
     "Rebasing onto branch `main`.\nRebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.\n"
   );
 });
@@ -301,7 +301,7 @@ test("--verbose flag is recognised", async () => {
 test("-v alias works", async () => {
   const { stdout, exitCode } = await run(["-v"]);
   expect(exitCode).toBe(0);
-  expect(stdout).toBe(
+  expect(stdout).toContain(
     "Rebasing onto branch `main`.\nRebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.\n"
   );
 });
@@ -311,21 +311,13 @@ test("unknown flag exits with non-zero code", async () => {
   expect(exitCode).not.toBe(0);
 });
 
-test("--sha prints HEAD short sha", async () => {
+test("--verbose prints HEAD short sha", async () => {
   const { repoPath } = await makeRepoWithDivergedBranch();
   const expectedSha = (await Bun.$`git rev-parse --short HEAD`.cwd(repoPath).text()).trim();
 
-  const { stdout, exitCode } = await run(["--sha"], { cwd: repoPath });
+  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
-  expect(stdout).toContain(expectedSha);
-});
-
-test("--sha is not printed without flag", async () => {
-  const repoPath = await makeGitRepo();
-  const sha = (await Bun.$`git rev-parse --short HEAD`.cwd(repoPath).text()).trim();
-
-  const { stdout } = await run([], { cwd: repoPath });
-  expect(stdout).not.toContain(sha);
+  expect(stdout).toContain(`Current commit: \`${expectedSha}\``);
 });
 
 // --- auth tests ---

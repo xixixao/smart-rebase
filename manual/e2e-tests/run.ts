@@ -278,6 +278,13 @@ try {
 } catch (e) {
   console.error(`\n\x1b[1;31m✗ E2E test failed:\x1b[0m`);
   console.error(e instanceof Error ? e.message : String(e));
+  if (e != null && typeof e === "object") {
+    const stderr = "stderr" in e ? String((e as { stderr: unknown }).stderr).trim() : "";
+    const stdout = "stdout" in e ? String((e as { stdout: unknown }).stdout).trim() : "";
+    if (stderr) console.error(`stderr:\n${stderr}`);
+    if (stdout) console.error(`stdout:\n${stdout}`);
+  }
+  if (e instanceof Error && e.stack) console.error(e.stack);
   process.exitCode = 1;
 } finally {
   // Always clean up, even on failure.

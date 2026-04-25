@@ -1,9 +1,10 @@
 import { type } from "arktype";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { openBrowser } from "./manual/openBrowser";
 import { textInputPrompt, withProgress } from "./manual/prompt";
 import { q } from "./format";
+import { getDataDir } from "./paths";
 
 export const GITLAB_TOKEN_URL =
   "https://gitlab.com/-/user_settings/personal_access_tokens?name=gitlab-rebase&scopes=api";
@@ -13,16 +14,7 @@ export interface GitLabAuth {
 }
 
 function getSettingsPath(): string {
-  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
-  if (process.platform === "darwin") {
-    return join(home, "Library", "Application Support", "gitlab-rebase", "credentials.json");
-  } else if (process.platform === "win32") {
-    const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
-    return join(appData, "gitlab-rebase", "credentials.json");
-  } else {
-    const configHome = process.env.XDG_CONFIG_HOME ?? join(home, ".config");
-    return join(configHome, "gitlab-rebase", "credentials.json");
-  }
+  return join(getDataDir(), "credentials.json");
 }
 
 const SettingsSchema = type({ "token?": "string" });
@@ -43,7 +35,7 @@ async function loadSettings(): Promise<Partial<GitLabAuth>> {
 async function saveSettings(auth: GitLabAuth): Promise<string | null> {
   const settingsPath = getSettingsPath();
   try {
-    await mkdir(dirname(settingsPath), { recursive: true });
+    await mkdir(getDataDir(), { recursive: true });
     await Bun.write(settingsPath, JSON.stringify(auth, null, 2));
     return settingsPath;
   } catch {

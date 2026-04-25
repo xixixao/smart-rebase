@@ -2,6 +2,7 @@ import { type } from "arktype";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { MRWithCommits } from "./gitlab";
+import { getDataDir } from "./paths";
 
 const CACHE_VERSION = 4;
 
@@ -29,15 +30,9 @@ const CacheFile = type({
   mrs: CachedEntry.array(),
 });
 
-function cacheDir(): string {
-  if (process.env.GITLAB_CACHE_DIR) return process.env.GITLAB_CACHE_DIR;
-  const home = process.env.HOME ?? "/tmp";
-  return join(home, ".cache", "gitlab-rebase");
-}
-
 function cachePath(baseUrl: string, projectId: string): string {
   const key = `${baseUrl}:${projectId}`.replace(/[^a-zA-Z0-9.-]/g, "_");
-  return join(cacheDir(), `${key}.json`);
+  return join(getDataDir(), `${key}.json`);
 }
 
 export async function readCache(
@@ -66,9 +61,13 @@ export async function writeCache(
   projectId: string,
   mrs: MRWithCommits[]
 ): Promise<void> {
-  mkdirSync(cacheDir(), { recursive: true });
-  await Bun.write(
-    cachePath(baseUrl, projectId),
-    JSON.stringify({ version: CACHE_VERSION, mrs })
-  );
+  try {
+    mkdirSync(getDataDir(), { recursive: true });
+    await Bun.write(
+      cachePath(baseUrl, projectId),
+      JSON.stringify({ version: CACHE_VERSION, mrs })
+    );
+  } catch {
+    // cache write failure is non-fatal
+  }
 }

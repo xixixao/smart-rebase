@@ -1,12 +1,12 @@
 import { test, expect, afterAll, beforeAll, beforeEach, jest } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { main } from "./index";
 import { GITLAB_TOKEN_URL } from "./auth";
 
-const testConfigDir = mkdtempSync("/tmp/gitlab-rebase-test-config-");
-const testCredsFile = join(testConfigDir, "gitlab-rebase", "credentials.json");
+const testDataDir = mkdtempSync("/tmp/gitlab-rebase-test-data-");
+const testCredsFile = join(testDataDir, "credentials.json");
 
 // Dates relative to the fixed initial commit date ("2020-01-01") used in makeGitRepo.
 const RECENT = "2021-01-01T00:00:00+00:00"; // after base → MR passes merged_at filter
@@ -66,7 +66,7 @@ beforeAll(async () => {
 
 afterAll(() => {
   mockGitLab.stop();
-  rmSync(testConfigDir, { recursive: true, force: true });
+  rmSync(testDataDir, { recursive: true, force: true });
 });
 beforeEach(async () => {
   mockMRs = [];
@@ -180,8 +180,7 @@ async function run(
     GITLAB_TOKEN: "testtoken",
     GITLAB_URL,
     GITLAB_PROJECT: "testgroup/testrepo",
-    XDG_CONFIG_HOME: testConfigDir,
-    GITLAB_CACHE_DIR: mkdtempSync("/tmp/gitlab-rebase-test-"),
+    GITLAB_DATA_DIR: mkdtempSync("/tmp/gitlab-rebase-test-data-"),
     ...opts.env,
   };
 
@@ -506,22 +505,22 @@ test("errors when multiple remotes exist and none is named origin", async () => 
 
 test("saves credentials to settings file when prompted and prints the path", async () => {
   const { stderr, exitCode } = await run([], {
-    env: { GITLAB_TOKEN: undefined },
+    env: { GITLAB_TOKEN: undefined, GITLAB_DATA_DIR: testDataDir },
     inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
   expect(stderr).toContain("GitLab token saved to");
-  expect(stderr).toContain(testConfigDir);
+  expect(stderr).toContain(testDataDir);
   const creds = await Bun.file(testCredsFile).json();
   expect(creds.token).toBe("mytoken");
 });
 
 test("loads credentials from settings file when env vars are not set", async () => {
-  mkdirSync(dirname(testCredsFile), { recursive: true });
+  mkdirSync(testDataDir, { recursive: true });
   await Bun.write(testCredsFile, JSON.stringify({ token: "savedtoken" }));
 
   const { stderr, exitCode } = await run([], {
-    env: { GITLAB_TOKEN: undefined },
+    env: { GITLAB_TOKEN: undefined, GITLAB_DATA_DIR: testDataDir },
   });
   expect(exitCode).toBe(0);
   expect(stderr).not.toContain("GITLAB_TOKEN` is not set");
@@ -531,7 +530,7 @@ test("saves credentials to macOS Library path when on darwin", async () => {
   const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
   const { exitCode } = await run([], {
     platform: "darwin",
-    env: { GITLAB_TOKEN: undefined, HOME: tmpHome, XDG_CONFIG_HOME: undefined },
+    env: { GITLAB_TOKEN: undefined, HOME: tmpHome, GITLAB_DATA_DIR: undefined },
     inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
@@ -542,7 +541,7 @@ test("saves credentials to APPDATA path when on win32", async () => {
   const tmpAppData = mkdtempSync("/tmp/gitlab-rebase-test-appdata-");
   const { exitCode } = await run([], {
     platform: "win32",
-    env: { GITLAB_TOKEN: undefined, APPDATA: tmpAppData, XDG_CONFIG_HOME: undefined },
+    env: { GITLAB_TOKEN: undefined, APPDATA: tmpAppData, GITLAB_DATA_DIR: undefined },
     inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
@@ -553,7 +552,7 @@ test("saves credentials to XDG_CONFIG_HOME path when on linux", async () => {
   const tmpXdg = mkdtempSync("/tmp/gitlab-rebase-test-xdg-");
   const { exitCode } = await run([], {
     platform: "linux",
-    env: { GITLAB_TOKEN: undefined, XDG_CONFIG_HOME: tmpXdg },
+    env: { GITLAB_TOKEN: undefined, XDG_CONFIG_HOME: tmpXdg, GITLAB_DATA_DIR: undefined },
     inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
@@ -561,11 +560,11 @@ test("saves credentials to XDG_CONFIG_HOME path when on linux", async () => {
 });
 
 test("env var takes precedence over saved credentials", async () => {
-  mkdirSync(dirname(testCredsFile), { recursive: true });
+  mkdirSync(testDataDir, { recursive: true });
   await Bun.write(testCredsFile, JSON.stringify({ token: "savedtoken" }));
 
   const { stderr, exitCode } = await run([], {
-    env: { GITLAB_TOKEN: "envtoken" },
+    env: { GITLAB_TOKEN: "envtoken", GITLAB_DATA_DIR: testDataDir },
   });
   expect(exitCode).toBe(0);
   expect(stderr).not.toContain("GITLAB_TOKEN` is not set");
@@ -602,7 +601,7 @@ test("env var takes precedence over .netrc token", async () => {
 });
 
 test(".netrc takes precedence over saved credentials", async () => {
-  mkdirSync(dirname(testCredsFile), { recursive: true });
+  mkdirSync(testDataDir, { recursive: true });
   await Bun.write(testCredsFile, JSON.stringify({ token: "savedtoken" }));
   const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
   await Bun.write(
@@ -610,7 +609,7 @@ test(".netrc takes precedence over saved credentials", async () => {
     "machine localhost\npassword netrctoken\n"
   );
   const { stderr, exitCode } = await run([], {
-    env: { GITLAB_TOKEN: undefined, HOME: tmpHome },
+    env: { GITLAB_TOKEN: undefined, HOME: tmpHome, GITLAB_DATA_DIR: testDataDir },
   });
   expect(exitCode).toBe(0);
   expect(stderr).not.toContain("GITLAB_TOKEN` is not set");
@@ -663,14 +662,14 @@ test("merges cached older MRs with fresh ones", async () => {
 
   mockMRs = [{ iid: 1, title: "Old MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "old commit" }]);
-  await run([], { cwd: repoPath, env: { GITLAB_CACHE_DIR: tmpDir } });
+  await run([], { cwd: repoPath, env: { GITLAB_DATA_DIR: tmpDir } });
 
   // First run rebases the feature branch; reset it so the second run sees the same repo state.
   await Bun.$`git reset --hard ${headSha}`.cwd(repoPath).quiet();
 
   mockMRs = [{ iid: 2, title: "New MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(2, [{ id: mergedShas[1]!, short_id: mergedShas[1]!.slice(0, 8), title: "new commit" }]);
-  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath, env: { GITLAB_CACHE_DIR: tmpDir } });
+  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath, env: { GITLAB_DATA_DIR: tmpDir } });
 
   expect(exitCode).toBe(0);
   expect(stdout).toContain("!1 Old MR");
@@ -683,14 +682,14 @@ test("fresh data replaces cached version of same MR", async () => {
 
   mockMRs = [{ iid: 1, title: "Old title", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "the commit" }]);
-  await run([], { cwd: repoPath, env: { GITLAB_CACHE_DIR: tmpDir } });
+  await run([], { cwd: repoPath, env: { GITLAB_DATA_DIR: tmpDir } });
 
   // First run rebases the feature branch; reset it so the second run sees the same repo state.
   await Bun.$`git reset --hard ${headSha}`.cwd(repoPath).quiet();
 
   mockMRs = [{ iid: 1, title: "Updated title", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "the commit" }]);
-  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath, env: { GITLAB_CACHE_DIR: tmpDir } });
+  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath, env: { GITLAB_DATA_DIR: tmpDir } });
 
   expect(exitCode).toBe(0);
   expect(stdout).toContain("Updated title");
@@ -700,11 +699,11 @@ test("fresh data replaces cached version of same MR", async () => {
 // --- error handling tests ---
 
 test("handles invalid JSON in credentials file by prompting again", async () => {
-  mkdirSync(dirname(testCredsFile), { recursive: true });
+  mkdirSync(testDataDir, { recursive: true });
   writeFileSync(testCredsFile, "not valid json{{{");
 
   const { stderr, exitCode } = await run([], {
-    env: { GITLAB_TOKEN: undefined },
+    env: { GITLAB_TOKEN: undefined, GITLAB_DATA_DIR: testDataDir },
     inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
@@ -755,13 +754,14 @@ test("exits with error when remote exists but has no URL configured", async () =
   expect(stderr).toContain("GITLAB_PROJECT");
 });
 
-test("uses default cache directory when GITLAB_CACHE_DIR is not set", async () => {
+test("uses default data directory when GITLAB_DATA_DIR is not set", async () => {
   const homeDir = mkdtempSync("/tmp/gitlab-rebase-home-");
   const { exitCode } = await run([], {
-    env: { GITLAB_CACHE_DIR: undefined, HOME: homeDir },
+    env: { GITLAB_DATA_DIR: undefined, HOME: homeDir, XDG_CONFIG_HOME: undefined },
   });
   expect(exitCode).toBe(0);
-  expect(existsSync(join(homeDir, ".cache", "gitlab-rebase"))).toBe(true);
+  // Platform defaults to "linux" in tests, so falls back to ~/.config/gitlab-rebase
+  expect(existsSync(join(homeDir, ".config", "gitlab-rebase"))).toBe(true);
 });
 
 test("exits normally when GITLAB_TOKEN is set without needing stdin input", async () => {
@@ -770,14 +770,15 @@ test("exits normally when GITLAB_TOKEN is set without needing stdin input", asyn
 });
 
 test("proceeds gracefully when credentials cannot be saved", async () => {
-  // Place a file where the credentials directory should be so mkdir fails
+  // Place a regular file at the path that would be used as the data directory so mkdir fails
   const blockingBase = mkdtempSync("/tmp/gitlab-rebase-block-");
-  writeFileSync(join(blockingBase, "gitlab-rebase"), "blocker");
+  const blockingDataDir = join(blockingBase, "gitlab-rebase");
+  writeFileSync(blockingDataDir, "blocker");
 
   const { stderr, exitCode } = await run([], {
     env: {
       GITLAB_TOKEN: undefined,
-      XDG_CONFIG_HOME: blockingBase,
+      GITLAB_DATA_DIR: blockingDataDir,
     },
     inkStdin: "mytoken\r",
   });
@@ -786,11 +787,11 @@ test("proceeds gracefully when credentials cannot be saved", async () => {
 });
 
 test("handles corrupted cache file gracefully", async () => {
-  const cacheDir = mkdtempSync("/tmp/gitlab-rebase-cache-corrupt-");
+  const dataDir = mkdtempSync("/tmp/gitlab-rebase-cache-corrupt-");
   const key = `${GITLAB_URL}:testgroup/testrepo`.replace(/[^a-zA-Z0-9.-]/g, "_");
-  writeFileSync(join(cacheDir, `${key}.json`), "corrupted{{{{");
+  writeFileSync(join(dataDir, `${key}.json`), "corrupted{{{{");
 
-  const { exitCode } = await run([], { env: { GITLAB_CACHE_DIR: cacheDir } });
+  const { exitCode } = await run([], { env: { GITLAB_DATA_DIR: dataDir } });
   expect(exitCode).toBe(0);
 });
 

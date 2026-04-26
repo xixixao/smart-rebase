@@ -914,6 +914,60 @@ test("paginates to fetch MRs until updated_at falls before base commit date", as
   expect(mrPagesFetched).toBe(2);
 });
 
+test("second run stops MR pagination at newest cached updated_at when merge base unchanged", async () => {
+  const U2024 = "2024-01-01T00:00:00+00:00";
+  const U2023 = "2023-01-01T00:00:00+00:00";
+  const U2022 = "2022-01-01T00:00:00+00:00";
+  const U2021 = "2021-01-01T00:00:00+00:00";
+  const tmpDir = mkdtempSync("/tmp/gitlab-rebase-cache-since-");
+  mockMRs = [
+    { iid: 5, title: "MR5", target_branch: "main", merged_at: RECENT, updated_at: U2024 },
+    { iid: 4, title: "MR4", target_branch: "main", merged_at: RECENT, updated_at: U2023 },
+    { iid: 3, title: "MR3", target_branch: "main", merged_at: RECENT, updated_at: U2022 },
+    { iid: 2, title: "MR2", target_branch: "main", merged_at: RECENT, updated_at: U2021 },
+    { iid: 1, title: "MR1", target_branch: "main", merged_at: OLD, updated_at: OLD },
+  ];
+  for (const iid of [1, 2, 3, 4, 5]) mockCommits.set(iid, []);
+
+  await run([], { env: { GITLAB_DATA_DIR: tmpDir, GITLAB_PER_PAGE: "1" } });
+  expect(mrPagesFetched).toBe(5);
+
+  // First run rebases the feature branch; reset it so the second run has the same merge base.
+  await Bun.$`git checkout feature`.cwd(defaultTestCwd).quiet().nothrow();
+  await Bun.$`git reset --hard ${defaultFeatureSha}`.cwd(defaultTestCwd).quiet().nothrow();
+
+  mrPagesFetched = 0;
+  await run([], { env: { GITLAB_DATA_DIR: tmpDir, GITLAB_PER_PAGE: "1" } });
+  expect(mrPagesFetched).toBe(2);
+});
+
+test("refetches from baseDate when merge base moves backwards between runs", async () => {
+  const repoPath = await makeGitRepo(); // initial commit at 2020-01-01
+  const initialSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
+  const D2021 = "2021-01-01T00:00:00+00:00";
+  await Bun.$`git commit --allow-empty -m "later main commit"`
+    .cwd(repoPath)
+    .env({ ...process.env, GIT_AUTHOR_DATE: D2021, GIT_COMMITTER_DATE: D2021 })
+    .quiet();
+  await Bun.$`git checkout -b feature`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "feature work"`.cwd(repoPath).quiet();
+
+  const tmpDir = mkdtempSync("/tmp/gitlab-rebase-backwards-");
+  mockMRs = [{ iid: 1, title: "MR1", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(1, []);
+
+  // First run: merge base is 2021 commit; cache stores mergeBaseCommitAt = "2021-01-01".
+  await run([], { cwd: repoPath, env: { GITLAB_DATA_DIR: tmpDir } });
+
+  // Reset feature to branch from the older 2020 initial commit (merge base moves backwards).
+  await Bun.$`git reset --hard ${initialSha}`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "older feature"`.cwd(repoPath).quiet();
+
+  // Second run: baseDate "2020-01-01" < cached mergeBaseCommitAt "2021-01-01" → refetch from baseDate.
+  const { exitCode } = await run([], { cwd: repoPath, env: { GITLAB_DATA_DIR: tmpDir } });
+  expect(exitCode).toBe(0);
+});
+
 // --- target branch update tests ---
 
 const REBASE_SUMMARY =

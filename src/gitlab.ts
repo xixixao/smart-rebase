@@ -1,5 +1,9 @@
 import { type } from "arktype";
 
+export function getGitlabUrl(): string {
+  return process.env.GITLAB_URL ?? "https://gitlab.com";
+}
+
 const MergeRequest = type({
   iid: "number",
   title: "string",

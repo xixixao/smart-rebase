@@ -1,6 +1,6 @@
 import { createCli, type Argv } from "./cli";
 import { getAuth } from "./auth";
-import { fetchMergedMRsSince, type MRWithCommits } from "./gitlab";
+import { fetchMergedMRsSince, type MRWithCommits, getGitlabUrl } from "./gitlab";
 import { readCache, writeCache } from "./storage";
 import { selectPrompt, withProgress } from "./manual/prompt";
 import { q } from "./format";
@@ -17,7 +17,7 @@ export async function main(
   const argv = (await createCli(args).parseAsync()) as Argv;
   
   const auth = await getAuth(opts.stdin);
-  
+
   await ensureGitRepo(cwd, argv.verbose);
 
   await checkAndStashDirtyChanges(cwd, opts.stdin);
@@ -26,7 +26,6 @@ export async function main(
 
   await checkAndUpdateTargetBranch(cwd, target, opts.stdin);
 
-  const gitlabUrl = process.env.GITLAB_URL ?? "https://gitlab.com";
   const projectId = await getProjectId(cwd);
 
   const baseSha = await getBaseSha(cwd, target);
@@ -35,12 +34,12 @@ export async function main(
       getBaseCommitDate(cwd, baseSha),
       getCurrentBranch(cwd),
       getCurrentBranchShas(cwd, baseSha),
-      readCache(gitlabUrl, projectId),
+      readCache(projectId),
     ]);
   const currentBranchShaSet = new Set(currentBranchShas);
 
   const fresh = await fetchMergedMRsSince({
-    baseUrl: gitlabUrl,
+    baseUrl: getGitlabUrl(),
     projectId,
     token: auth.token,
     since: baseDate,
@@ -51,7 +50,7 @@ export async function main(
   for (const entry of fresh) byIid.set(entry.mr.iid, entry);
   const allMrs = [...byIid.values()].sort((a, b) => b.mr.iid - a.mr.iid);
 
-  await writeCache(gitlabUrl, projectId, allMrs);
+  await writeCache(projectId, allMrs);
 
   const sinceDate = new Date(baseDate);
   const mrsWithCommits = allMrs.filter(

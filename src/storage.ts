@@ -2,6 +2,7 @@ import { type } from "arktype";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { MRWithCommits } from "./gitlab";
+import { getGitlabUrl } from "./gitlab";
 import { getDataDir } from "./paths";
 import { q } from "./format";
 
@@ -37,9 +38,9 @@ function cachePath(baseUrl: string, projectId: string): string {
 }
 
 export async function readCache(
-  baseUrl: string,
   projectId: string
 ): Promise<MRWithCommits[] | null> {
+  const baseUrl = getGitlabUrl();
   const file = Bun.file(cachePath(baseUrl, projectId));
   if (!(await file.exists())) return null;
 
@@ -58,10 +59,10 @@ export async function readCache(
 }
 
 export async function writeCache(
-  baseUrl: string,
   projectId: string,
   mrs: MRWithCommits[]
 ): Promise<void> {
+  const baseUrl = getGitlabUrl();
   const path = cachePath(baseUrl, projectId);
   try {
     mkdirSync(getDataDir(), { recursive: true });

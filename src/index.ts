@@ -1,6 +1,6 @@
 import { createCli, type Argv } from "./cli";
 import { getAuth } from "./auth";
-import { fetchMergedMRsSince, type MRWithCommits, getGitlabUrl } from "./gitlab";
+import { fetchMergedMRs, type MRWithCommits, getGitlabUrl } from "./gitlab";
 import { readCache, writeCache } from "./storage";
 import { selectPrompt, withProgress } from "./manual/prompt";
 import { q } from "./format";
@@ -29,46 +29,54 @@ export async function main(
   const projectId = await getProjectId(cwd);
 
   const baseSha = await getBaseSha(cwd, target);
-  const [baseDate, currentBranch, currentBranchShas, cached] =
-    await Promise.all([
-      getBaseCommitDate(cwd, baseSha),
-      getCurrentBranch(cwd),
-      getCurrentBranchShas(cwd, baseSha),
-      readCache(projectId),
-    ]);
-  const currentBranchShaSet = new Set(currentBranchShas);
+  {
 
-  const fresh = await fetchMergedMRsSince({
-    baseUrl: getGitlabUrl(),
-    projectId,
-    token: auth.token,
-    since: baseDate,
-  });
-
-  const byIid = new Map<number, MRWithCommits>();
-  for (const entry of cached ?? []) byIid.set(entry.mr.iid, entry);
-  for (const entry of fresh) byIid.set(entry.mr.iid, entry);
-  const allMrs = [...byIid.values()].sort((a, b) => b.mr.iid - a.mr.iid);
-
-  await writeCache(projectId, allMrs);
-
-  const sinceDate = new Date(baseDate);
-  const mrsWithCommits = allMrs.filter(
-    ({ mr, commits }) =>
-      mr.merged_at !== null &&
-      mr.target_branch === target &&
-      new Date(mr.merged_at) >= sinceDate &&
-      commits.some((c) => currentBranchShaSet.has(c.id)),
-  );
-
-  if (currentBranchShas.length === 0) {
-    throw new Error(
-      `No commits on branch ${q(currentBranch)} ahead of ${q(target)}.`,
+    const [baseDate, currentBranch, currentBranchShas, cached] =
+      await Promise.all([
+        getCurrentBranch(cwd),
+        getCurrentBranchShas(cwd, baseSha),
+        readCache(projectId),
+      ]);
+    // const currentBranchShaSet = new Set(currentBranchShas);
+  
+    const fresh = await fetchMergedMRs({
+      baseUrl: getGitlabUrl(),
+      projectId,
+      token: auth.token,
+      since: baseDate,
+    });
+    const byIid = new Map<number, MRWithCommits>();
+    for (const entry of cached ?? []) byIid.set(entry.mr.iid, entry);
+    for (const entry of fresh) byIid.set(entry.mr.iid, entry);
+    const allMrs = [...byIid.values()].sort((a, b) => b.mr.iid - a.mr.iid);
+    await writeCache(projectId, allMrs);
+  
+    // const sinceDate = new Date(baseDate);
+    const relevantMRs = allMrs.filter(
+      ({ mr }) =>
+        mr.merged_at !== null &&
+        mr.target_branch === target
     );
+    if (currentBranchShas.length === 0) {
+      throw new Error(
+        `No commits on branch ${q(currentBranch)} ahead of ${q(target)}.`,
+      );
+    }
+    if (argv.verbose) {
+      for (const { mr, commits } of relevantMRs) {
+        console.log(`!${mr.iid} ${mr.title}`);
+        for (const commit of commits) {
+          console.log(`  ${commit.short_id} ${commit.title}`);
+        }
+      }
+    }
   }
 
+
+
+
   const mergedCommitIds = new Set<string>();
-  for (const { commits } of mrsWithCommits) {
+  for (const { commits } of relevantMRs) {
     for (const commit of commits) mergedCommitIds.add(commit.id);
   }
   const alreadyMergedCount = currentBranchShas.filter((sha) =>
@@ -97,14 +105,6 @@ export async function main(
     } already been merged to ${q(target)}. Will rebase ${willRebaseStr}.`,
   );
 
-  if (argv.verbose) {
-    for (const { mr, commits } of mrsWithCommits) {
-      console.log(`!${mr.iid} ${mr.title}`);
-      for (const commit of commits) {
-        console.log(`  ${commit.short_id} ${commit.title}`);
-      }
-    }
-  }
 
   // Re-check current branch; stash/update steps could in principle change it.
   const branchBeforeRebase = await getCurrentBranch(cwd);

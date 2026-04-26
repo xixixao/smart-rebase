@@ -21,7 +21,7 @@ const SettingsSchema = type({ "token?": "string" });
 
 async function loadSettings(): Promise<Partial<GitLabAuth>> {
   const file = Bun.file(getSettingsPath());
-  
+
   if (!(await file.exists())) return {};
   try {
     const data = SettingsSchema(await file.json());
@@ -39,7 +39,7 @@ async function saveSettings(auth: GitLabAuth): Promise<string> {
     await Bun.write(settingsPath, JSON.stringify(auth, null, 2));
   } catch (e) {
     throw new Error(
-      `Failed to save credentials to ${settingsPath}: ${e instanceof Error ? e.message : e}\nSet ${q("GITLAB_DATA_DIR")} to change the location.`
+      `Failed to save credentials to ${settingsPath}: ${e instanceof Error ? e.message : e}\nSet ${q("GITLAB_DATA_DIR")} to change the location.`,
     );
   }
   return settingsPath;
@@ -56,9 +56,7 @@ async function loadNetrc(machine: string): Promise<string | undefined> {
   try {
     const text = await file.text();
     // Tokenize the .netrc file (comments start with #)
-    const tokens = text
-      .split(/\s+/)
-      .filter((t) => t.length > 0 && !t.startsWith("#"));
+    const tokens = text.split(/\s+/).filter((t) => t.length > 0 && !t.startsWith("#"));
     let i = 0;
     while (i < tokens.length) {
       if (tokens[i] === "machine" && tokens[i + 1] === machine) {
@@ -94,13 +92,8 @@ export async function getAuth(stdin?: NodeJS.ReadableStream): Promise<GitLabAuth
 
   if (!token) {
     process.stderr.write(`Environment variable ${q("GITLAB_TOKEN")} is not set.\n`);
-    process.stderr.write(
-      `Create a personal access token with ${q("api")} scope at:\n  ${q(GITLAB_TOKEN_URL)}\n\n`,
-    );
-    token = await textInputPrompt(
-      `Press ${q("Enter")} to open in your browser, or paste your token: `,
-      stdin,
-    );
+    process.stderr.write(`Create a personal access token with ${q("api")} scope at:\n  ${q(GITLAB_TOKEN_URL)}\n\n`);
+    token = await textInputPrompt(`Press ${q("Enter")} to open in your browser, or paste your token: `, stdin);
     if (token === "") {
       await withProgress("Opening browser...", async () => {
         await openBrowser(GITLAB_TOKEN_URL);

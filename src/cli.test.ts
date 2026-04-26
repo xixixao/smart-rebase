@@ -10,7 +10,7 @@ const testCredsFile = join(testDataDir, "credentials.json");
 
 // Dates relative to the fixed initial commit date ("2020-01-01") used in makeGitRepo.
 const RECENT = "2021-01-01T00:00:00+00:00"; // after base → MR passes merged_at filter
-const OLD = "2019-01-01T00:00:00+00:00";    // before base → MR fails merged_at filter
+const OLD = "2019-01-01T00:00:00+00:00"; // before base → MR fails merged_at filter
 
 let mockMRs: object[] = [];
 const mockCommits = new Map<number, object[]>();
@@ -42,7 +42,10 @@ const mockGitLab = Bun.serve({
     if (pathname.match(/\/merge_requests$/)) {
       mrPagesFetched++;
       if (mockMRsStatusCode !== 200) return new Response("Server Error", { status: mockMRsStatusCode });
-      if (mockMRsError) return Response.json([{ iid: "not-a-number", title: "Bad", target_branch: "main", merged_at: null, updated_at: OLD }]);
+      if (mockMRsError)
+        return Response.json([
+          { iid: "not-a-number", title: "Bad", target_branch: "main", merged_at: null, updated_at: OLD },
+        ]);
       const page = parseInt(url.searchParams.get("page") ?? "1");
       const perPage = parseInt(url.searchParams.get("per_page") ?? "50");
       return Response.json(mockMRs.slice((page - 1) * perPage, page * perPage));
@@ -77,7 +80,9 @@ beforeEach(async () => {
   mockMRsError = false;
   mockMRsStatusCode = 200;
   mockCommitsErrorIid = null;
-  try { rmSync(testCredsFile); } catch {}
+  try {
+    rmSync(testCredsFile);
+  } catch {}
   // Reset shared repo: git rebase in main() moves the feature branch, so restore it.
   if (defaultTestCwd && defaultFeatureSha) {
     await Bun.$`git checkout feature`.cwd(defaultTestCwd).quiet().nothrow();
@@ -95,8 +100,12 @@ function parseKeySequences(keys: string): string[] {
   const result: string[] = [];
   let i = 0;
   while (i < keys.length) {
-    if (keys.slice(i, i + 3) === "\x1B[A" || keys.slice(i, i + 3) === "\x1B[B" ||
-        keys.slice(i, i + 3) === "\x1B[C" || keys.slice(i, i + 3) === "\x1B[D") {
+    if (
+      keys.slice(i, i + 3) === "\x1B[A" ||
+      keys.slice(i, i + 3) === "\x1B[B" ||
+      keys.slice(i, i + 3) === "\x1B[C" ||
+      keys.slice(i, i + 3) === "\x1B[D"
+    ) {
       result.push(keys.slice(i, i + 3));
       i += 3;
     } else {
@@ -170,9 +179,13 @@ async function run(
     cwd?: string;
     platform?: NodeJS.Platform;
     stdoutIsTTY?: boolean;
-  } = {}
+  } = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const spyOnGetter = jest.spyOn as (obj: NodeJS.Process, key: "platform", accessor: "get") => { mockReturnValue: (v: NodeJS.Platform) => void; mockRestore: () => void };
+  const spyOnGetter = jest.spyOn as (
+    obj: NodeJS.Process,
+    key: "platform",
+    accessor: "get",
+  ) => { mockReturnValue: (v: NodeJS.Platform) => void; mockRestore: () => void };
   const platformSpy = spyOnGetter(process, "platform", "get");
   platformSpy.mockReturnValue(opts.platform ?? "linux");
 
@@ -219,10 +232,7 @@ async function run(
 
   let exitCode = 0;
   try {
-    await main(args, {
-      cwd: opts.cwd ?? defaultTestCwd,
-      stdin: inkStream as unknown as NodeJS.ReadableStream,
-    });
+    await main(args, { cwd: opts.cwd ?? defaultTestCwd, stdin: inkStream as unknown as NodeJS.ReadableStream });
   } catch (e: unknown) {
     exitCode = 1;
     stderrBuffer += (e instanceof Error ? e.message : String(e)) + "\n";
@@ -245,7 +255,6 @@ async function run(
   return { stdout: stripAnsi(stdoutBuffer), stderr: stripAnsi(stderrBuffer), exitCode };
 }
 
-
 async function makeBrowserScript(): Promise<{ browserScript: string; browserLog: string }> {
   const tmpDir = mkdtempSync("/tmp/gitlab-rebase-test-");
   const browserScript = join(tmpDir, "browser.sh");
@@ -264,7 +273,8 @@ async function makeGitRepo(remotes: Record<string, string> = {}): Promise<string
   // Fixed date so the base commit date is always "2020-01-01T00:00:00+00:00",
   // making mock MR dates predictable (RECENT = 2021, OLD = 2019).
   const D = "2020-01-01T00:00:00+00:00";
-  await Bun.$`git commit --allow-empty -m "Initial commit"`.cwd(repoPath)
+  await Bun.$`git commit --allow-empty -m "Initial commit"`
+    .cwd(repoPath)
     .env({ ...process.env, GIT_AUTHOR_DATE: D, GIT_COMMITTER_DATE: D })
     .quiet();
   for (const [name, url] of Object.entries(remotes)) {
@@ -286,7 +296,7 @@ test("uses colors instead of backticks when stdout is a TTY", async () => {
   expect(exitCode).toBe(0);
   // ANSI codes are stripped here; names appear without backtick delimiters
   expect(stdout.trim()).toBe(
-    "Rebasing onto branch main.\nRebasing feature onto main. 0 commits have already been merged to main. Will rebase 1 commit."
+    "Rebasing onto branch main.\nRebasing feature onto main. 0 commits have already been merged to main. Will rebase 1 commit.",
   );
 });
 
@@ -294,7 +304,7 @@ test("--verbose flag is recognised", async () => {
   const { stdout, exitCode } = await run(["--verbose"]);
   expect(exitCode).toBe(0);
   expect(stdout).toContain(
-    "Rebasing onto branch `main`.\nRebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.\n"
+    "Rebasing onto branch `main`.\nRebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.\n",
   );
 });
 
@@ -302,7 +312,7 @@ test("-v alias works", async () => {
   const { stdout, exitCode } = await run(["-v"]);
   expect(exitCode).toBe(0);
   expect(stdout).toContain(
-    "Rebasing onto branch `main`.\nRebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.\n"
+    "Rebasing onto branch `main`.\nRebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.\n",
   );
 });
 
@@ -329,20 +339,14 @@ test("runs without auth prompts when env vars are set", async () => {
 });
 
 test("prompts for token when GITLAB_TOKEN is not set", async () => {
-  const { stderr, exitCode } = await run([], {
-    env: { GITLAB_TOKEN: undefined },
-    inkStdin: "mytoken\r",
-  });
+  const { stderr, exitCode } = await run([], { env: { GITLAB_TOKEN: undefined }, inkStdin: "mytoken\r" });
   expect(exitCode).toBe(0);
   expect(stderr).toContain("GITLAB_TOKEN");
   expect(stderr).toContain("gitlab.com");
 });
 
 test("token prompt shows GitLab URL with api scope", async () => {
-  const { stderr } = await run([], {
-    env: { GITLAB_TOKEN: undefined },
-    inkStdin: "mytoken\r",
-  });
+  const { stderr } = await run([], { env: { GITLAB_TOKEN: undefined }, inkStdin: "mytoken\r" });
   expect(stderr).toContain(GITLAB_TOKEN_URL);
 });
 
@@ -377,10 +381,7 @@ test("does not open browser when token is pasted directly", async () => {
 });
 
 test("accepts token with surrounding whitespace", async () => {
-  const { exitCode } = await run([], {
-    env: { GITLAB_TOKEN: undefined },
-    inkStdin: "  mytoken  \r",
-  });
+  const { exitCode } = await run([], { env: { GITLAB_TOKEN: undefined }, inkStdin: "  mytoken  \r" });
   expect(exitCode).toBe(0);
 });
 
@@ -412,7 +413,7 @@ test("outputs only the rebase summary when there are no merged MRs", async () =>
   expect(exitCode).toBe(0);
   expect(stdout.trim()).toBe(
     "Rebasing onto branch `main`.\n" +
-      "Rebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit."
+      "Rebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.",
   );
 });
 
@@ -434,10 +435,7 @@ test("fetches commits for all MRs", async () => {
 
 test("exits with error when project cannot be determined", async () => {
   const repoPath = await makeGitRepo();
-  const { stderr, exitCode } = await run([], {
-    cwd: repoPath,
-    env: { GITLAB_PROJECT: undefined },
-  });
+  const { stderr, exitCode } = await run([], { cwd: repoPath, env: { GITLAB_PROJECT: undefined } });
   expect(exitCode).not.toBe(0);
   expect(stderr).toContain("GITLAB_PROJECT");
 });
@@ -446,10 +444,7 @@ test("detects project from origin remote", async () => {
   const { repoPath } = await makeRepoWithDivergedBranch();
   await Bun.$`git remote add origin git@gitlab.com:mygroup/myproject.git`.cwd(repoPath).quiet();
 
-  const { exitCode } = await run([], {
-    cwd: repoPath,
-    env: { GITLAB_PROJECT: undefined },
-  });
+  const { exitCode } = await run([], { cwd: repoPath, env: { GITLAB_PROJECT: undefined } });
   expect(exitCode).toBe(0);
   expect(lastRequestedProject).toBe("mygroup/myproject");
 });
@@ -458,10 +453,7 @@ test("detects project from the sole remote when it is not named origin", async (
   const { repoPath } = await makeRepoWithDivergedBranch();
   await Bun.$`git remote add upstream git@gitlab.com:org/upstream-project.git`.cwd(repoPath).quiet();
 
-  const { exitCode } = await run([], {
-    cwd: repoPath,
-    env: { GITLAB_PROJECT: undefined },
-  });
+  const { exitCode } = await run([], { cwd: repoPath, env: { GITLAB_PROJECT: undefined } });
   expect(exitCode).toBe(0);
   expect(lastRequestedProject).toBe("org/upstream-project");
 });
@@ -471,24 +463,15 @@ test("uses origin when both origin and another remote exist", async () => {
   await Bun.$`git remote add origin git@gitlab.com:maingroup/mainproject.git`.cwd(repoPath).quiet();
   await Bun.$`git remote add fork git@gitlab.com:forkgroup/forkproject.git`.cwd(repoPath).quiet();
 
-  const { exitCode } = await run([], {
-    cwd: repoPath,
-    env: { GITLAB_PROJECT: undefined },
-  });
+  const { exitCode } = await run([], { cwd: repoPath, env: { GITLAB_PROJECT: undefined } });
   expect(exitCode).toBe(0);
   expect(lastRequestedProject).toBe("maingroup/mainproject");
 });
 
 test("errors when multiple remotes exist and none is named origin", async () => {
-  const repoPath = await makeGitRepo({
-    foo: "git@gitlab.com:foo/project.git",
-    bar: "git@gitlab.com:bar/project.git",
-  });
+  const repoPath = await makeGitRepo({ foo: "git@gitlab.com:foo/project.git", bar: "git@gitlab.com:bar/project.git" });
 
-  const { stderr, exitCode } = await run([], {
-    cwd: repoPath,
-    env: { GITLAB_PROJECT: undefined },
-  });
+  const { stderr, exitCode } = await run([], { cwd: repoPath, env: { GITLAB_PROJECT: undefined } });
   expect(exitCode).not.toBe(0);
   expect(stderr).toContain("GITLAB_PROJECT");
 });
@@ -511,9 +494,7 @@ test("loads credentials from settings file when env vars are not set", async () 
   mkdirSync(testDataDir, { recursive: true });
   await Bun.write(testCredsFile, JSON.stringify({ token: "savedtoken" }));
 
-  const { stderr, exitCode } = await run([], {
-    env: { GITLAB_TOKEN: undefined, GITLAB_DATA_DIR: testDataDir },
-  });
+  const { stderr, exitCode } = await run([], { env: { GITLAB_TOKEN: undefined, GITLAB_DATA_DIR: testDataDir } });
   expect(exitCode).toBe(0);
   expect(stderr).not.toContain("GITLAB_TOKEN` is not set");
 });
@@ -555,9 +536,7 @@ test("env var takes precedence over saved credentials", async () => {
   mkdirSync(testDataDir, { recursive: true });
   await Bun.write(testCredsFile, JSON.stringify({ token: "savedtoken" }));
 
-  const { stderr, exitCode } = await run([], {
-    env: { GITLAB_TOKEN: "envtoken", GITLAB_DATA_DIR: testDataDir },
-  });
+  const { stderr, exitCode } = await run([], { env: { GITLAB_TOKEN: "envtoken", GITLAB_DATA_DIR: testDataDir } });
   expect(exitCode).toBe(0);
   expect(stderr).not.toContain("GITLAB_TOKEN` is not set");
   expect(stderr).not.toContain("GitLab token saved");
@@ -567,26 +546,16 @@ test("env var takes precedence over saved credentials", async () => {
 
 test("reads token from .netrc matching the GITLAB_URL hostname", async () => {
   const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
-  await Bun.write(
-    join(tmpHome, ".netrc"),
-    "machine localhost\nlogin user@example.com\npassword netrctoken\n"
-  );
-  const { stderr, exitCode } = await run([], {
-    env: { GITLAB_TOKEN: undefined, HOME: tmpHome },
-  });
+  await Bun.write(join(tmpHome, ".netrc"), "machine localhost\nlogin user@example.com\npassword netrctoken\n");
+  const { stderr, exitCode } = await run([], { env: { GITLAB_TOKEN: undefined, HOME: tmpHome } });
   expect(exitCode).toBe(0);
   expect(stderr).not.toContain("GITLAB_TOKEN` is not set");
 });
 
 test("env var takes precedence over .netrc token", async () => {
   const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
-  await Bun.write(
-    join(tmpHome, ".netrc"),
-    "machine localhost\npassword netrctoken\n"
-  );
-  const { stderr, exitCode } = await run([], {
-    env: { GITLAB_TOKEN: "envtoken", HOME: tmpHome },
-  });
+  await Bun.write(join(tmpHome, ".netrc"), "machine localhost\npassword netrctoken\n");
+  const { stderr, exitCode } = await run([], { env: { GITLAB_TOKEN: "envtoken", HOME: tmpHome } });
   expect(exitCode).toBe(0);
   expect(stderr).not.toContain("GITLAB_TOKEN` is not set");
   expect(stderr).not.toContain("GitLab token saved");
@@ -596,10 +565,7 @@ test(".netrc takes precedence over saved credentials", async () => {
   mkdirSync(testDataDir, { recursive: true });
   await Bun.write(testCredsFile, JSON.stringify({ token: "savedtoken" }));
   const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
-  await Bun.write(
-    join(tmpHome, ".netrc"),
-    "machine localhost\npassword netrctoken\n"
-  );
+  await Bun.write(join(tmpHome, ".netrc"), "machine localhost\npassword netrctoken\n");
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome, GITLAB_DATA_DIR: testDataDir },
   });
@@ -610,10 +576,7 @@ test(".netrc takes precedence over saved credentials", async () => {
 
 test("prompts when .netrc does not contain a matching machine entry", async () => {
   const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
-  await Bun.write(
-    join(tmpHome, ".netrc"),
-    "machine other.example.com\npassword othertoken\n"
-  );
+  await Bun.write(join(tmpHome, ".netrc"), "machine other.example.com\npassword othertoken\n");
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome },
     inkStdin: "mytoken\r",
@@ -624,10 +587,7 @@ test("prompts when .netrc does not contain a matching machine entry", async () =
 
 test("prompts when .netrc machine entry has no password field", async () => {
   const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
-  await Bun.write(
-    join(tmpHome, ".netrc"),
-    "machine localhost\nlogin user@example.com\n"
-  );
+  await Bun.write(join(tmpHome, ".netrc"), "machine localhost\nlogin user@example.com\n");
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome },
     inkStdin: "mytoken\r",
@@ -738,10 +698,7 @@ test("exits with error when remote exists but has no URL configured", async () =
   await Bun.$`git remote add origin git@gitlab.com:foo/bar`.cwd(repoPath).quiet();
   await Bun.$`git config --unset remote.origin.url`.cwd(repoPath).quiet();
 
-  const { stderr, exitCode } = await run([], {
-    cwd: repoPath,
-    env: { GITLAB_PROJECT: undefined },
-  });
+  const { stderr, exitCode } = await run([], { cwd: repoPath, env: { GITLAB_PROJECT: undefined } });
   expect(exitCode).not.toBe(0);
   expect(stderr).toContain("GITLAB_PROJECT");
 });
@@ -768,10 +725,7 @@ test("fails with helpful message when credentials cannot be saved", async () => 
   writeFileSync(blockingDataDir, "blocker");
 
   const { stderr, exitCode } = await run([], {
-    env: {
-      GITLAB_TOKEN: undefined,
-      GITLAB_DATA_DIR: blockingDataDir,
-    },
+    env: { GITLAB_TOKEN: undefined, GITLAB_DATA_DIR: blockingDataDir },
     inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(1);
@@ -827,11 +781,9 @@ async function makeRepoWithDivergedBranch(): Promise<{
 // Feature branch with `mergedCount` commits (available for MR matching) plus
 // one trailing "new work" commit that remains after the rebase. Main has one
 // extra commit on top of the branch point so there is always a rebase target.
-async function makeRepoWithMergedAndNewFeature(mergedCount: number): Promise<{
-  repoPath: string;
-  mergedShas: string[];
-  headSha: string;
-}> {
+async function makeRepoWithMergedAndNewFeature(
+  mergedCount: number,
+): Promise<{ repoPath: string; mergedShas: string[]; headSha: string }> {
   const repoPath = await makeGitRepo();
   await Bun.$`git checkout -b feature`.cwd(repoPath).quiet();
   const mergedShas: string[] = [];
@@ -941,9 +893,7 @@ test("exits with error when target branch does not exist", async () => {
 // --- pagination tests ---
 
 test("stops fetching when first page MRs are older than base commit date", async () => {
-  mockMRs = [
-    { iid: 1, title: "Old MR", target_branch: "main", merged_at: OLD, updated_at: OLD },
-  ];
+  mockMRs = [{ iid: 1, title: "Old MR", target_branch: "main", merged_at: OLD, updated_at: OLD }];
   mockCommits.set(1, []);
 
   const { exitCode } = await run([], { env: { GITLAB_PER_PAGE: "1" } });
@@ -987,9 +937,7 @@ const UPDATE_PROMPT_SKIP_SELECTED =
   "❯ 2. Skip\n" +
   "\n" +
   "↑↓ to navigate · Enter to select\n";
-const UPDATE_SUCCESS =
-  "Updating branch `main` from remote `origin`...\n" +
-  "Branch `main` updated.\n";
+const UPDATE_SUCCESS = "Updating branch `main` from remote `origin`...\n" + "Branch `main` updated.\n";
 const STASH_PROMPT_STASH_SELECTED =
   "You have uncommitted changes.\n" +
   "\n" +
@@ -1011,10 +959,7 @@ const REBASE_SUCCESS = "Rebasing (1/1)\nSuccessfully rebased and updated refs/he
 // When baseSha equals target tip, git rebase --onto is a no-op.
 const REBASE_UPTODATE = "Current branch feature is up to date.\n";
 
-async function makeRepoWithRemoteAhead(): Promise<{
-  repoPath: string;
-  remoteNewSha: string;
-}> {
+async function makeRepoWithRemoteAhead(): Promise<{ repoPath: string; remoteNewSha: string }> {
   const remotePath = await makeGitRepo();
   const localPath = mkdtempSync("/tmp/gitlab-rebase-test-");
   await Bun.$`git clone ${remotePath} ${localPath}`.quiet();
@@ -1084,17 +1029,12 @@ test("updates checked-out target branch so index and worktree match remote", asy
   const { stderr, stdout, exitCode } = await run([], { cwd: localPath, inkStdin: KEY_ENTER });
   expect(exitCode).not.toBe(0);
   expect(stderr).toBe(
-    UPDATE_PROMPT_UPDATE_SELECTED +
-      UPDATE_SUCCESS +
-      "No commits on branch `main` ahead of `main`.\n",
+    UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + "No commits on branch `main` ahead of `main`.\n",
   );
   expect(stdout).toBe("Rebasing onto branch `main`.\n");
   expect((await Bun.$`git rev-parse main`.cwd(localPath).text()).trim()).toBe(remoteNewSha);
   expect((await Bun.$`git rev-parse HEAD`.cwd(localPath).text()).trim()).toBe(remoteNewSha);
-  const wtClean = await Bun.$`git diff --quiet && git diff --cached --quiet`
-    .cwd(localPath)
-    .quiet()
-    .nothrow();
+  const wtClean = await Bun.$`git diff --quiet && git diff --cached --quiet`.cwd(localPath).quiet().nothrow();
   expect(wtClean.exitCode).toBe(0);
 });
 
@@ -1119,18 +1059,14 @@ test("exits with error when target update fails due to diverged branches", async
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).not.toBe(0);
   expect(stderr).toBe(
-    UPDATE_PROMPT_UPDATE_SELECTED +
-      "Cannot update branch `main`: it has diverged from branch `origin/main`.\n"
+    UPDATE_PROMPT_UPDATE_SELECTED + "Cannot update branch `main`: it has diverged from branch `origin/main`.\n",
   );
   expect(stdout).toBe("Rebasing onto branch `main`.\n");
 });
 
 // --- stash prompt tests ---
 
-async function makeRepoWithRemoteAheadAndDirty(): Promise<{
-  repoPath: string;
-  remoteNewSha: string;
-}> {
+async function makeRepoWithRemoteAheadAndDirty(): Promise<{ repoPath: string; remoteNewSha: string }> {
   const result = await makeRepoWithRemoteAhead();
   writeFileSync(join(result.repoPath, "dirty.txt"), "dirty content");
   await Bun.$`git add dirty.txt`.cwd(result.repoPath).quiet();
@@ -1139,10 +1075,7 @@ async function makeRepoWithRemoteAheadAndDirty(): Promise<{
 
 test("shows stash prompt before update prompt when dirty changes exist", async () => {
   const { repoPath } = await makeRepoWithRemoteAheadAndDirty();
-  const { stderr, exitCode } = await run([], {
-    cwd: repoPath,
-    inkStdin: KEY_ENTER + KEY_ENTER,
-  });
+  const { stderr, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER + KEY_ENTER });
   expect(exitCode).toBe(0);
   // git stash output includes a dynamic SHA, so check the static parts around it
   expect(stderr.startsWith(STASH_PROMPT_STASH_SELECTED + STASH_PROGRESS)).toBe(true);
@@ -1151,10 +1084,7 @@ test("shows stash prompt before update prompt when dirty changes exist", async (
 
 test("stashes changes when user selects Stash", async () => {
   const { repoPath } = await makeRepoWithRemoteAheadAndDirty();
-  const { exitCode } = await run([], {
-    cwd: repoPath,
-    inkStdin: KEY_ENTER + KEY_ENTER,
-  });
+  const { exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER + KEY_ENTER });
   expect(exitCode).toBe(0);
   const stashList = (await Bun.$`git stash list`.cwd(repoPath).text()).trim();
   expect(stashList).not.toBe("");
@@ -1162,18 +1092,16 @@ test("stashes changes when user selects Stash", async () => {
 
 test("does not stash when user selects Skip on stash prompt", async () => {
   const { repoPath } = await makeRepoWithRemoteAheadAndDirty();
-  const { stderr, exitCode } = await run([], {
-    cwd: repoPath,
-    inkStdin: KEY_DOWN + KEY_ENTER + KEY_ENTER,
-  });
+  const { stderr, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_DOWN + KEY_ENTER + KEY_ENTER });
   // Staged changes were not stashed, so git rebase refuses to run.
   expect(exitCode).not.toBe(0);
   expect(stderr).toBe(
     STASH_PROMPT_SKIP_SELECTED +
-    UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS +
-    REBASE_PROGRESS +
-    "error: cannot rebase: Your index contains uncommitted changes.\n" +
-    "error: Please commit or stash them.\n",
+      UPDATE_PROMPT_UPDATE_SELECTED +
+      UPDATE_SUCCESS +
+      REBASE_PROGRESS +
+      "error: cannot rebase: Your index contains uncommitted changes.\n" +
+      "error: Please commit or stash them.\n",
   );
   // Nothing was stashed despite the failure.
   const stashList = (await Bun.$`git stash list`.cwd(repoPath).text()).trim();
@@ -1219,9 +1147,9 @@ test("skips already-merged commits and rebases only the remaining ones", async (
   expect(exitCode).toBe(0);
   expect(stdout).toContain(
     "Rebasing onto branch `main`.\n" +
-    "Rebasing `feature` onto `main`. 1 commit has already been merged to `main`. Will rebase 1 commit.\n" +
-    "!1 Merged MR\n" +
-    `  ${mergedSha.slice(0, 8)} merged commit\n`,
+      "Rebasing `feature` onto `main`. 1 commit has already been merged to `main`. Will rebase 1 commit.\n" +
+      "!1 Merged MR\n" +
+      `  ${mergedSha.slice(0, 8)} merged commit\n`,
   );
   expect(stderr).toBe(REBASE_PROGRESS + REBASE_SUCCESS);
   // After rebase, "new work" is on top of main's new commit; "merged commit" was dropped.

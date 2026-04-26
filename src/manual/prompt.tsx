@@ -17,13 +17,7 @@ function Indicator({ isSelected = false }: { isSelected?: boolean }) {
   );
 }
 
-function ItemText({
-  isSelected = false,
-  label,
-}: {
-  isSelected?: boolean;
-  label: string;
-}) {
+function ItemText({ isSelected = false, label }: { isSelected?: boolean; label: string }) {
   const [number, rawText] = label.split(". ", 2);
   const text = rawText ?? "";
   const parts: { text: string; isCode: boolean }[] = [];
@@ -31,13 +25,11 @@ function ItemText({
   let lastIndex = 0;
   let match;
   while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex)
-      parts.push({ text: text.slice(lastIndex, match.index), isCode: false });
+    if (match.index > lastIndex) parts.push({ text: text.slice(lastIndex, match.index), isCode: false });
     parts.push({ text: match[1]!, isCode: true });
     lastIndex = match.index + match[0].length;
   }
-  if (lastIndex < text.length)
-    parts.push({ text: text.slice(lastIndex), isCode: false });
+  if (lastIndex < text.length) parts.push({ text: text.slice(lastIndex), isCode: false });
   if (parts.length === 0) parts.push({ text, isCode: false });
   return (
     <Text color={isSelected ? "blueBright" : undefined}>
@@ -57,13 +49,8 @@ function ItemText({
   );
 }
 
-export async function withProgress(
-  message: string,
-  fn: () => Promise<void>,
-): Promise<void> {
-  const { unmount, clear } = render(<Text>{message}</Text>, {
-    stdout: process.stderr as NodeJS.WriteStream,
-  });
+export async function withProgress(message: string, fn: () => Promise<void>): Promise<void> {
+  const { unmount, clear } = render(<Text>{message}</Text>, { stdout: process.stderr as NodeJS.WriteStream });
   try {
     await fn();
   } finally {
@@ -108,10 +95,7 @@ export async function selectPrompt(
   stdin: NodeJS.ReadableStream = process.stdin as NodeJS.ReadableStream,
 ): Promise<string> {
   return new Promise<string>((resolve) => {
-    const numberedItems = items.map((item, i) => ({
-      ...item,
-      label: `${i + 1}. ${item.label}`,
-    }));
+    const numberedItems = items.map((item, i) => ({ ...item, label: `${i + 1}. ${item.label}` }));
 
     function App() {
       return (
@@ -123,9 +107,7 @@ export async function selectPrompt(
           <SelectInput
             items={numberedItems}
             indicatorComponent={Indicator as FC<{ isSelected?: boolean }>}
-            itemComponent={
-              ItemText as FC<{ isSelected?: boolean; label: string }>
-            }
+            itemComponent={ItemText as FC<{ isSelected?: boolean; label: string }>}
             onSelect={(item) => {
               clear();
               unmount();

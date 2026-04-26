@@ -8,11 +8,7 @@ import { q } from "./format";
 
 const CACHE_VERSION = 4;
 
-const CachedCommit = type({
-  id: "string",
-  short_id: "string",
-  title: "string",
-});
+const CachedCommit = type({ id: "string", short_id: "string", title: "string" });
 
 const CachedMR = type({
   iid: "number",
@@ -22,24 +18,16 @@ const CachedMR = type({
   updated_at: "string",
 });
 
-const CachedEntry = type({
-  mr: CachedMR,
-  commits: CachedCommit.array(),
-});
+const CachedEntry = type({ mr: CachedMR, commits: CachedCommit.array() });
 
-const CacheFile = type({
-  version: "number",
-  mrs: CachedEntry.array(),
-});
+const CacheFile = type({ version: "number", mrs: CachedEntry.array() });
 
 function cachePath(baseUrl: string, projectId: string): string {
   const key = `${baseUrl}:${projectId}`.replace(/[^a-zA-Z0-9.-]/g, "_");
   return join(getDataDir(), `${key}.json`);
 }
 
-export async function readCache(
-  projectId: string
-): Promise<MRWithCommits[] | null> {
+export async function readCache(projectId: string): Promise<MRWithCommits[] | null> {
   const baseUrl = getGitlabUrl();
   const file = Bun.file(cachePath(baseUrl, projectId));
   if (!(await file.exists())) return null;
@@ -58,10 +46,7 @@ export async function readCache(
   return data.mrs;
 }
 
-export async function writeCache(
-  projectId: string,
-  mrs: MRWithCommits[]
-): Promise<void> {
+export async function writeCache(projectId: string, mrs: MRWithCommits[]): Promise<void> {
   const baseUrl = getGitlabUrl();
   const path = cachePath(baseUrl, projectId);
   try {
@@ -69,7 +54,7 @@ export async function writeCache(
     await Bun.write(path, JSON.stringify({ version: CACHE_VERSION, mrs }));
   } catch (e) {
     throw new Error(
-      `Failed to write cache to ${path}: ${e instanceof Error ? e.message : e}\nSet ${q("GITLAB_DATA_DIR")} to change the location.`
+      `Failed to write cache to ${path}: ${e instanceof Error ? e.message : e}\nSet ${q("GITLAB_DATA_DIR")} to change the location.`,
     );
   }
 }

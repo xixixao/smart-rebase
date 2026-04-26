@@ -8,6 +8,7 @@
     "@types/yargs": "^17.0.35",
     "eslint": "^10.2.1",
     "jiti": "^2.6.1",
+    "prettier": "^3.8.3",
     "typescript-eslint": "^8.59.0"
   },
   "peerDependencies": {
@@ -19,6 +20,8 @@
   "private": true,
   "scripts": {
     "check": "bun run lint && bun run typecheck && bun run test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "lint": "eslint .",
     "start": "bun run src/manual/entry.ts",
     "test": "bun test",

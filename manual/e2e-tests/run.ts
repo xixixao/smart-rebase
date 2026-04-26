@@ -61,10 +61,7 @@ function encodeProject(path: string): string {
  * Calls the GitLab API via glab and returns parsed JSON.
  * method defaults to GET; use -X POST/PUT/DELETE in extraArgs for mutations.
  */
-async function glabApi(
-  endpoint: string,
-  extraArgs: string[] = [],
-): Promise<unknown> {
+async function glabApi(endpoint: string, extraArgs: string[] = []): Promise<unknown> {
   const result = await $`glab api ${endpoint} ${extraArgs}`.quiet();
   const text = result.stdout.toString().trim();
   if (!text) return null;
@@ -107,10 +104,14 @@ try {
   // 2. Create a private GitLab repository.
   await step(`Create GitLab repo: ${repoName}`, async () => {
     await glabApi("projects", [
-      "-X", "POST",
-      "-f", `name=${repoName}`,
-      "-f", "visibility=private",
-      "-f", "initialize_with_readme=false",
+      "-X",
+      "POST",
+      "-f",
+      `name=${repoName}`,
+      "-f",
+      "visibility=private",
+      "-f",
+      "initialize_with_readme=false",
     ]);
     console.log(`  created: ${projectPath}`);
   });
@@ -119,10 +120,7 @@ try {
   //    commit on main with no merge-commit, which is what gitlab-rebase is
   //    designed to handle.
   await step("Enable fast-forward merge method on the repo", async () => {
-    await glabApi(`projects/${encodeProject(projectPath)}`, [
-      "-X", "PUT",
-      "-f", "merge_method=ff",
-    ]);
+    await glabApi(`projects/${encodeProject(projectPath)}`, ["-X", "PUT", "-f", "merge_method=ff"]);
     console.log(`  merge_method set to ff (fast-forward)`);
   });
 
@@ -157,16 +155,18 @@ try {
 
   // 7. Open MR A.
   await step("Create MR A (feature-a → main)", async () => {
-    const mr = (await glabApi(
-      `projects/${encodeProject(projectPath)}/merge_requests`,
-      [
-        "-X", "POST",
-        "-f", "source_branch=feature-a",
-        "-f", "target_branch=main",
-        "-f", "title=MR A: Feature A",
-        "-f", "description=First feature branch",
-      ],
-    )) as { iid: number };
+    const mr = (await glabApi(`projects/${encodeProject(projectPath)}/merge_requests`, [
+      "-X",
+      "POST",
+      "-f",
+      "source_branch=feature-a",
+      "-f",
+      "target_branch=main",
+      "-f",
+      "title=MR A: Feature A",
+      "-f",
+      "description=First feature branch",
+    ])) as { iid: number };
     mrAIid = mr.iid;
     console.log(`  MR A: !${mrAIid}`);
   });
@@ -194,16 +194,18 @@ try {
 
   // 9. Open MR B.
   await step("Create MR B (feature-b → main)", async () => {
-    const mr = (await glabApi(
-      `projects/${encodeProject(projectPath)}/merge_requests`,
-      [
-        "-X", "POST",
-        "-f", "source_branch=feature-b",
-        "-f", "target_branch=main",
-        "-f", "title=MR B: Feature B",
-        "-f", "description=Second feature branch",
-      ],
-    )) as { iid: number };
+    const mr = (await glabApi(`projects/${encodeProject(projectPath)}/merge_requests`, [
+      "-X",
+      "POST",
+      "-f",
+      "source_branch=feature-b",
+      "-f",
+      "target_branch=main",
+      "-f",
+      "title=MR B: Feature B",
+      "-f",
+      "description=Second feature branch",
+    ])) as { iid: number };
     mrBIid = mr.iid;
     console.log(`  MR B: !${mrBIid}`);
   });
@@ -212,10 +214,12 @@ try {
   //     squash commit on main (no merge-commit), which is the scenario that
   //     gitlab-rebase must recognise and skip when rebasing feature-b.
   await step(`Merge MR A (!${mrAIid}) — squash, fast-forward`, async () => {
-    await glabApi(
-      `projects/${encodeProject(projectPath)}/merge_requests/${mrAIid}/merge`,
-      ["-X", "PUT", "-f", "squash=true"],
-    );
+    await glabApi(`projects/${encodeProject(projectPath)}/merge_requests/${mrAIid}/merge`, [
+      "-X",
+      "PUT",
+      "-f",
+      "squash=true",
+    ]);
     console.log(`  MR A merged`);
   });
 
@@ -224,14 +228,24 @@ try {
     await $`git checkout main`.cwd(repoDir).quiet();
     await $`git pull origin main`.cwd(repoDir).quiet();
     const log = (await $`git log --oneline -5`.cwd(repoDir).text()).trim();
-    console.log(`  main history:\n${log.split("\n").map((l) => `    ${l}`).join("\n")}`);
+    console.log(
+      `  main history:\n${log
+        .split("\n")
+        .map((l) => `    ${l}`)
+        .join("\n")}`,
+    );
   });
 
   // 12. Switch to feature-b so gitlab-rebase operates on it.
   await step("Check out feature-b", async () => {
     await $`git checkout feature-b`.cwd(repoDir).quiet();
     const log = (await $`git log --oneline -6`.cwd(repoDir).text()).trim();
-    console.log(`  feature-b history:\n${log.split("\n").map((l) => `    ${l}`).join("\n")}`);
+    console.log(
+      `  feature-b history:\n${log
+        .split("\n")
+        .map((l) => `    ${l}`)
+        .join("\n")}`,
+    );
   });
 
   // 13. Run gitlab-rebase. It fetches merged MRs from GitLab, identifies that
@@ -241,7 +255,12 @@ try {
     const result = await $`bun run ${entryScript}`.cwd(repoDir).nothrow();
     const output = (result.stdout.toString() + result.stderr.toString()).trim();
     if (output) {
-      console.log(output.split("\n").map((l) => `  ${l}`).join("\n"));
+      console.log(
+        output
+          .split("\n")
+          .map((l) => `  ${l}`)
+          .join("\n"),
+      );
     }
     if (result.exitCode !== 0) {
       throw new Error(`gitlab-rebase exited with code ${result.exitCode}`);
@@ -252,15 +271,22 @@ try {
   await step("Force-push rebased feature-b", async () => {
     await $`git push --force-with-lease origin feature-b`.cwd(repoDir).quiet();
     const log = (await $`git log --oneline -6`.cwd(repoDir).text()).trim();
-    console.log(`  feature-b after rebase:\n${log.split("\n").map((l) => `    ${l}`).join("\n")}`);
+    console.log(
+      `  feature-b after rebase:\n${log
+        .split("\n")
+        .map((l) => `    ${l}`)
+        .join("\n")}`,
+    );
   });
 
   // 15. Merge MR B.
   await step(`Merge MR B (!${mrBIid}) — squash, fast-forward`, async () => {
-    await glabApi(
-      `projects/${encodeProject(projectPath)}/merge_requests/${mrBIid}/merge`,
-      ["-X", "PUT", "-f", "squash=true"],
-    );
+    await glabApi(`projects/${encodeProject(projectPath)}/merge_requests/${mrBIid}/merge`, [
+      "-X",
+      "PUT",
+      "-f",
+      "squash=true",
+    ]);
     console.log(`  MR B merged`);
   });
 
@@ -269,7 +295,12 @@ try {
     await $`git checkout main`.cwd(repoDir).quiet();
     await $`git pull origin main`.cwd(repoDir).quiet();
     const log = (await $`git log --oneline`.cwd(repoDir).text()).trim();
-    console.log(`  final main history:\n${log.split("\n").map((l) => `    ${l}`).join("\n")}`);
+    console.log(
+      `  final main history:\n${log
+        .split("\n")
+        .map((l) => `    ${l}`)
+        .join("\n")}`,
+    );
 
     // Sanity check: main should have exactly 3 commits
     // (initial + squashed MR A + squashed MR B).

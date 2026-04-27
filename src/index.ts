@@ -20,6 +20,15 @@ export async function main(args: string[], opts: { cwd?: string; stdin?: NodeJS.
 
   await checkAndUpdateTargetBranch(cwd, target, opts.stdin);
 
+  await rebaseUnmergedCommitsOnCurrentBranch(cwd, target, auth, argv.verbose);
+}
+
+async function rebaseUnmergedCommitsOnCurrentBranch(
+  cwd: string,
+  target: string,
+  auth: GitLabAuth,
+  verbose: boolean,
+): Promise<void> {
   const projectId = await getProjectId(cwd);
 
   const baseSha = await getBaseSha(cwd, target);
@@ -27,7 +36,7 @@ export async function main(args: string[], opts: { cwd?: string; stdin?: NodeJS.
   const [currentBranch, currentBranchShas, mergedCommitIds] = await Promise.all([
     getCurrentBranch(cwd),
     getCurrentBranchShas(cwd, baseSha),
-    getAllAlreadyMergedCommits(cwd, baseSha, projectId, target, auth, argv.verbose),
+    getAllAlreadyMergedCommits(cwd, baseSha, projectId, target, auth, verbose),
   ]);
   // const currentBranchShaSet = new Set(currentBranchShas);
 

@@ -1188,27 +1188,30 @@ test("skips already-merged commits and rebases only the remaining ones", async (
   await Bun.$`git checkout -b feature`.cwd(repoPath).quiet();
   await Bun.$`git commit --allow-empty -m "merged commit"`.cwd(repoPath).quiet();
   const mergedSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
+  const mergedShortSha = mergedSha.slice(0, 8);
   await Bun.$`git commit --allow-empty -m "new work"`.cwd(repoPath).quiet();
+  const newWorkShortSha = (await Bun.$`git rev-parse --short HEAD`.cwd(repoPath).text()).trim();
   await Bun.$`git checkout main`.cwd(repoPath).quiet();
   await Bun.$`git commit --allow-empty -m "landed on main"`.cwd(repoPath).quiet();
-  const mainSha = (await Bun.$`git rev-parse HEAD`.cwd(repoPath).text()).trim();
+  const mainShortSha = (await Bun.$`git rev-parse --short HEAD`.cwd(repoPath).text()).trim();
   await Bun.$`git checkout feature`.cwd(repoPath).quiet();
 
   mockMRs = [{ iid: 1, title: "Merged MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
-  mockCommits.set(1, [{ id: mergedSha, short_id: mergedSha.slice(0, 8), title: "merged commit" }]);
+  mockCommits.set(1, [{ id: mergedSha, short_id: mergedShortSha, title: "merged commit" }]);
 
   const { stdout, stderr, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
   expect(stdout).toContain(
-    "Rebasing onto branch `main`.\n" +
-      "Rebasing `feature` onto `main`. 1 commit has already been merged to `main`. Will rebase 1 commit.\n" +
+    `Current commit: \`${newWorkShortSha}\`\n` +
+      "Rebasing onto branch `main`.\n" +
       "!1 Merged MR\n" +
-      `  ${mergedSha.slice(0, 8)} merged commit\n`,
+      `  ${mergedShortSha} merged commit\n` +
+      "Rebasing `feature` onto `main`. 1 commit has already been merged to `main`. Will rebase 1 commit.\n",
   );
   expect(stderr).toBe(REBASE_PROGRESS + REBASE_SUCCESS);
   // After rebase, "new work" is on top of main's new commit; "merged commit" was dropped.
-  const headParent = (await Bun.$`git rev-parse HEAD~1`.cwd(repoPath).text()).trim();
-  expect(headParent).toBe(mainSha);
+  const headParent = (await Bun.$`git rev-parse --short HEAD~1`.cwd(repoPath).text()).trim();
+  expect(headParent).toBe(mainShortSha);
   const headMsg = (await Bun.$`git log -1 --format=%s HEAD`.cwd(repoPath).text()).trim();
   expect(headMsg).toBe("new work");
 });

@@ -24,10 +24,10 @@ export async function main(args: string[], opts: { cwd?: string; stdin?: NodeJS.
 
   const baseSha = await getBaseSha(cwd, target);
 
-  const [currentBranch, currentBranchShas, relevantMRs] = await Promise.all([
+  const [currentBranch, currentBranchShas, mergedCommitIds] = await Promise.all([
     getCurrentBranch(cwd),
     getCurrentBranchShas(cwd, baseSha),
-    fetchRelevantMergedMRs(cwd, baseSha, projectId, target, auth),
+    getAllAlreadyMergedCommits(cwd, baseSha, projectId, target, auth, argv.verbose),
   ]);
   // const currentBranchShaSet = new Set(currentBranchShas);
 
@@ -35,46 +35,31 @@ export async function main(args: string[], opts: { cwd?: string; stdin?: NodeJS.
     throw new Error(`No commits on branch ${q(currentBranch)} ahead of ${q(target)}.`);
   }
 
-  const mergedCommitIds = new Set<string>();
-  for (const { commits } of relevantMRs) {
-    for (const commit of commits) mergedCommitIds.add(commit.id);
-  }
-  const alreadyMergedCount = currentBranchShas.filter((sha) => mergedCommitIds.has(sha)).length;
-  const willRebaseCount = currentBranchShas.length - alreadyMergedCount;
-
-  if (willRebaseCount === 0) {
-    const n = alreadyMergedCount;
-    throw new Error(
-      `The ${n} ${n === 1 ? "commit" : "commits"} on branch ${q(
-        currentBranch,
-      )} ${n === 1 ? "has" : "have"} already been merged to ${q(target)}.`,
-    );
-  }
-
-  const mergedStr = `${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit" : "commits"}`;
-  const willRebaseStr = `${willRebaseCount} ${willRebaseCount === 1 ? "commit" : "commits"}`;
-  console.log(
-    `Rebasing ${q(currentBranch)} onto ${q(target)}. ${mergedStr} ${
-      alreadyMergedCount === 1 ? "has" : "have"
-    } already been merged to ${q(target)}. Will rebase ${willRebaseStr}.`,
-  );
-
-  if (argv.verbose) {
-    for (const { mr, commits } of relevantMRs) {
-      console.log(`!${mr.iid} ${mr.title}`);
-      for (const commit of commits) {
-        console.log(`  ${commit.short_id} ${commit.title}`);
-      }
-    }
-  }
-
   // Re-check current branch; stash/update steps could in principle change it.
-  const branchBeforeRebase = await getCurrentBranch(cwd);
-  if (branchBeforeRebase !== target) {
+  if (currentBranch !== target) {
     // Find the oldest non-merged commit; everything from its parent onward gets rebased.
     const reversedShas = [...currentBranchShas].reverse();
     const firstNonMergedIdx = reversedShas.findIndex((sha) => !mergedCommitIds.has(sha));
-    const rebaseUpstream = firstNonMergedIdx === 0 ? baseSha : reversedShas[firstNonMergedIdx - 1]!;
+    const rebaseUpstream = reversedShas[firstNonMergedIdx - 1] ?? baseSha;
+
+    const alreadyMergedCount = firstNonMergedIdx === -1 ? currentBranchShas.length : firstNonMergedIdx;
+    const willRebaseCount = currentBranchShas.length - alreadyMergedCount;
+
+    if (willRebaseCount === 0) {
+      const n = alreadyMergedCount;
+      const [commitNoun, haveVerb] = n === 1 ? ["commit", "has"] : ["commits", "have"];
+      throw new Error(
+        `The ${n} ${commitNoun} on branch ${q(currentBranch)} ${haveVerb} already been merged to ${q(target)}.`,
+      );
+    }
+
+    const mergedStr = `${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit" : "commits"}`;
+    const willRebaseStr = `${willRebaseCount} ${willRebaseCount === 1 ? "commit" : "commits"}`;
+    console.log(
+      `Rebasing ${q(currentBranch)} onto ${q(target)}. ${mergedStr} ${
+        alreadyMergedCount === 1 ? "has" : "have"
+      } already been merged to ${q(target)}. Will rebase ${willRebaseStr}.`,
+    );
 
     let rebaseOutput = "";
     await withProgress(`Rebasing ${willRebaseStr} onto ${q(target)}...`, async () => {
@@ -104,7 +89,7 @@ function maxIsoDateString(a: string, b: string): string {
 function mergeRequestFetchSince(baseDate: string, cache: MrsProjectCache | null): string {
   if (!cache?.mrs.length) return baseDate;
   const { mergeBaseCommitAt, mrs } = cache;
-  if (new Date(baseDate) < new Date(mergeBaseCommitAt)) {
+  if (!mergeBaseCommitAt || new Date(baseDate) < new Date(mergeBaseCommitAt)) {
     return baseDate;
   }
   let newest = mrs[0]!.mr.updated_at;
@@ -115,12 +100,25 @@ function mergeRequestFetchSince(baseDate: string, cache: MrsProjectCache | null)
   return maxIsoDateString(baseDate, newest);
 }
 
+async function getAllAlreadyMergedCommits(
+  cwd: string,
+  baseSha: string,
+  projectId: string,
+  target: string,
+  auth: GitLabAuth,
+  verbose: boolean,
+) {
+  const relevantMRs = await fetchRelevantMergedMRs(cwd, baseSha, projectId, target, auth, verbose);
+  return new Set(relevantMRs.flatMap(({ commits }) => commits.map(({ id }) => id)));
+}
+
 async function fetchRelevantMergedMRs(
   cwd: string,
   baseSha: string,
   projectId: string,
   target: string,
   auth: GitLabAuth,
+  verbose: boolean,
 ) {
   const [baseDate, cache] = await Promise.all([getBaseCommitDate(cwd, baseSha), readCache(projectId)]);
 
@@ -132,12 +130,18 @@ async function fetchRelevantMergedMRs(
   const allMrs = [...byIid.values()].sort((a, b) => b.mr.iid - a.mr.iid);
   await writeCache(projectId, allMrs, baseDate);
 
-  return allMrs.filter(
-    ({ mr }) =>
-      mr.merged_at !== null &&
-      mr.target_branch === target &&
-      new Date(mr.merged_at) >= new Date(baseDate),
+  const relevantMRs = allMrs.filter(
+    ({ mr }) => mr.merged_at !== null && mr.target_branch === target && new Date(mr.merged_at) >= new Date(baseDate),
   );
+  if (verbose) {
+    for (const { mr, commits } of relevantMRs) {
+      console.log(`!${mr.iid} ${mr.title}`);
+      for (const commit of commits) {
+        console.log(`  ${commit.short_id} ${commit.title}`);
+      }
+    }
+  }
+  return relevantMRs;
 }
 
 async function checkAndStashDirtyChanges(cwd: string, stdin?: NodeJS.ReadableStream): Promise<void> {

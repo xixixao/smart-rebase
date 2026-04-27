@@ -253,15 +253,6 @@ try {
   //     only the feature-b commits on top of main.
   await step("Run gitlab-rebase on feature-b", async () => {
     const result = await $`bun run ${entryScript}`.cwd(repoDir).nothrow();
-    const output = (result.stdout.toString() + result.stderr.toString()).trim();
-    if (output) {
-      console.log(
-        output
-          .split("\n")
-          .map((l) => `  ${l}`)
-          .join("\n"),
-      );
-    }
     if (result.exitCode !== 0) {
       throw new Error(`gitlab-rebase exited with code ${result.exitCode}`);
     }

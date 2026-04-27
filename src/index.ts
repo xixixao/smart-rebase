@@ -62,13 +62,12 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
       );
     }
 
-    const mergedStr = `${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit" : "commits"}`;
     const willRebaseStr = `${willRebaseCount} ${willRebaseCount === 1 ? "commit" : "commits"}`;
-    console.log(
-      `Rebasing ${q(currentBranch)} onto ${q(target)}. ${mergedStr} ${
-        alreadyMergedCount === 1 ? "has" : "have"
-      } already been merged to ${q(target)}. Will rebase ${willRebaseStr}.`,
-    );
+    const mergedSuffix =
+      alreadyMergedCount > 0
+        ? ` ${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit has" : "commits have"} already been merged to ${q(target)}.`
+        : "";
+    console.log(`Rebasing ${q(currentBranch)} onto ${q(target)}.${mergedSuffix} Will rebase ${willRebaseStr}.`);
 
     let rebaseOutput = "";
     await withProgress(`Rebasing ${willRebaseStr} onto ${q(target)}...`, async () => {

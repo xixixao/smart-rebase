@@ -295,25 +295,19 @@ test("uses colors instead of backticks when stdout is a TTY", async () => {
   const { stdout, exitCode } = await run([], { stdoutIsTTY: true });
   expect(exitCode).toBe(0);
   // ANSI codes are stripped here; names appear without backtick delimiters
-  expect(stdout.trim()).toBe(
-    "Rebasing onto branch main.\nRebasing feature onto main. 0 commits have already been merged to main. Will rebase 1 commit.",
-  );
+  expect(stdout.trim()).toBe("Rebasing onto branch main.\nRebasing feature onto main. Will rebase 1 commit.");
 });
 
 test("--verbose flag is recognised", async () => {
   const { stdout, exitCode } = await run(["--verbose"]);
   expect(exitCode).toBe(0);
-  expect(stdout).toContain(
-    "Rebasing onto branch `main`.\nRebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.\n",
-  );
+  expect(stdout).toContain("Rebasing onto branch `main`.\nRebasing `feature` onto `main`. Will rebase 1 commit.\n");
 });
 
 test("-v alias works", async () => {
   const { stdout, exitCode } = await run(["-v"]);
   expect(exitCode).toBe(0);
-  expect(stdout).toContain(
-    "Rebasing onto branch `main`.\nRebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.\n",
-  );
+  expect(stdout).toContain("Rebasing onto branch `main`.\nRebasing `feature` onto `main`. Will rebase 1 commit.\n");
 });
 
 test("unknown flag exits with non-zero code", async () => {
@@ -412,8 +406,7 @@ test("outputs only the rebase summary when there are no merged MRs", async () =>
   const { stdout, exitCode } = await run([]);
   expect(exitCode).toBe(0);
   expect(stdout.trim()).toBe(
-    "Rebasing onto branch `main`.\n" +
-      "Rebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.",
+    "Rebasing onto branch `main`.\n" + "Rebasing `feature` onto `main`. Will rebase 1 commit.",
   );
 });
 
@@ -970,8 +963,7 @@ test("refetches from baseDate when merge base moves backwards between runs", asy
 
 // --- target branch update tests ---
 
-const REBASE_SUMMARY =
-  "Rebasing `feature` onto `main`. 0 commits have already been merged to `main`. Will rebase 1 commit.";
+const REBASE_SUMMARY = "Rebasing `feature` onto `main`. Will rebase 1 commit.";
 const DEFAULT_STDOUT = "Rebasing onto branch `main`.\n" + REBASE_SUMMARY;
 // Final-frame ink SelectInput renders (ANSI-stripped). Because ink rewrites its
 // view on each state change and we strip cursor-motion codes from stderr, only

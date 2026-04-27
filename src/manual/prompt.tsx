@@ -9,46 +9,6 @@ interface Item {
   value: string;
 }
 
-function Indicator({ isSelected = false }: { isSelected?: boolean }) {
-  return (
-    <Box marginRight={1}>
-      <Text color="blueBright">{isSelected ? "❯" : " "}</Text>
-    </Box>
-  );
-}
-
-function ItemText({ isSelected = false, label }: { isSelected?: boolean; label: string }) {
-  const [number, rawText] = label.split(". ", 2);
-  const text = rawText ?? "";
-  const parts: { text: string; isCode: boolean }[] = [];
-  const regex = /\x1b\[94m(.*?)\x1b\[39m/g;
-  let lastIndex = 0;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) parts.push({ text: text.slice(lastIndex, match.index), isCode: false });
-    parts.push({ text: match[1]!, isCode: true });
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < text.length) parts.push({ text: text.slice(lastIndex), isCode: false });
-  if (parts.length === 0) parts.push({ text, isCode: false });
-  return (
-    <Text color={isSelected ? "blueBright" : undefined}>
-      <Text dimColor color="white">
-        {number ?? ""}.{" "}
-      </Text>
-      {parts.map((part, i) =>
-        part.isCode ? (
-          <Text key={i} color={isSelected ? "blue" : "blueBright"}>
-            {part.text}
-          </Text>
-        ) : (
-          <Text key={i}>{part.text}</Text>
-        ),
-      )}
-    </Text>
-  );
-}
-
 export async function withProgress(message: string, fn: () => Promise<void>): Promise<void> {
   const { unmount, clear } = render(<Text>{message}</Text>, { stdout: process.stderr as NodeJS.WriteStream });
   try {
@@ -82,10 +42,7 @@ export async function textInputPrompt(
       );
     }
 
-    const { unmount, clear } = render(<App />, {
-      stdout: process.stderr as NodeJS.WriteStream,
-      stdin: stdin as NodeJS.ReadStream,
-    });
+    const { unmount, clear } = render(<App />, { stdout: process.stderr, stdin: stdin as NodeJS.ReadStream });
   });
 }
 
@@ -123,9 +80,46 @@ export async function selectPrompt(
       );
     }
 
-    const { unmount, clear } = render(<App />, {
-      stdout: process.stderr as NodeJS.WriteStream,
-      stdin: stdin as NodeJS.ReadStream,
-    });
+    const { unmount, clear } = render(<App />, { stdout: process.stderr, stdin: stdin as NodeJS.ReadStream });
   });
+}
+
+function ItemText({ isSelected = false, label }: { isSelected?: boolean; label: string }) {
+  const [number, rawText] = label.split(". ", 2);
+  const text = rawText ?? "";
+  const parts: { text: string; isCode: boolean }[] = [];
+  const regex = /\x1b\[94m(.*?)\x1b\[39m/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push({ text: text.slice(lastIndex, match.index), isCode: false });
+    parts.push({ text: match[1]!, isCode: true });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) parts.push({ text: text.slice(lastIndex), isCode: false });
+  if (parts.length === 0) parts.push({ text, isCode: false });
+  return (
+    <Text color={isSelected ? "blueBright" : undefined}>
+      <Text dimColor color="white">
+        {number ?? ""}.{" "}
+      </Text>
+      {parts.map((part, i) =>
+        part.isCode ? (
+          <Text key={i} color={isSelected ? "blue" : "blueBright"}>
+            {part.text}
+          </Text>
+        ) : (
+          <Text key={i}>{part.text}</Text>
+        ),
+      )}
+    </Text>
+  );
+}
+
+function Indicator({ isSelected = false }: { isSelected?: boolean }) {
+  return (
+    <Box marginRight={1}>
+      <Text color="blueBright">{isSelected ? "❯" : " "}</Text>
+    </Box>
+  );
 }

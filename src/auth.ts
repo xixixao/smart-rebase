@@ -76,14 +76,14 @@ async function loadNetrc(machine: string): Promise<string | undefined> {
 }
 
 export async function getAuth(stdin?: NodeJS.ReadableStream): Promise<GitLabAuth> {
-  const saved = await loadSettings();
+  const saved = await withProgress("Checcking settings...", () => loadSettings());
 
   let token = process.env.GITLAB_TOKEN;
 
   if (!token) {
     const gitlabUrl = process.env.GITLAB_URL ?? "https://gitlab.com";
     const machine = new URL(gitlabUrl).hostname;
-    token = await loadNetrc(machine);
+    token = await withProgress("Checking netrc...", () => loadNetrc(machine));
   }
 
   if (!token) {
@@ -95,12 +95,11 @@ export async function getAuth(stdin?: NodeJS.ReadableStream): Promise<GitLabAuth
     process.stderr.write(`Create a personal access token with ${q("api")} scope at:\n  ${q(GITLAB_TOKEN_URL)}\n\n`);
     token = await textInputPrompt(`Press ${q("Enter")} to open in your browser, or paste your token: `, stdin);
     if (token === "") {
-      await withProgress("Opening browser...", async () => {
-        await openBrowser(GITLAB_TOKEN_URL);
-      });
+      await withProgress("Opening browser...", () => openBrowser(GITLAB_TOKEN_URL));
       token = await textInputPrompt("Enter your GitLab API token: ", stdin);
     }
-    const savedPath = await saveSettings({ token });
+    const savedToken = token;
+    const savedPath = await withProgress("Saving settings...", () => saveSettings({ token: savedToken }));
     process.stderr.write(`GitLab token saved to ${savedPath}\n`);
   }
 

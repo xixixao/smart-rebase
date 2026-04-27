@@ -253,7 +253,9 @@ async function fetchMergedMRsForMatching(
 }
 
 async function checkAndStashDirtyChanges(cwd: string, stdin?: NodeJS.ReadableStream): Promise<void> {
-  const result = await Bun.$`git diff --quiet HEAD`.cwd(cwd).quiet().nothrow();
+  const result = await withProgress("Checking for uncommitted changes...", () =>
+    Bun.$`git diff --quiet HEAD`.cwd(cwd).quiet().nothrow(),
+  );
   if (result.exitCode === 0) return;
 
   const choice = await selectPrompt(
@@ -335,13 +337,15 @@ async function getProjectId(cwd: string): Promise<string> {
 }
 
 async function ensureGitRepo(cwd: string, verbose: boolean): Promise<void> {
-  try {
-    const headShort = (await Bun.$`git rev-parse --short HEAD`.cwd(cwd).quiet().text()).trim();
-    if (verbose) {
-      console.log(`Current commit: ${q(headShort)}`);
+  const headShort = await withProgress("Checking Git repository...", async () => {
+    try {
+      return (await Bun.$`git rev-parse --short HEAD`.cwd(cwd).quiet().text()).trim();
+    } catch {
+      throw new Error(`Not a Git repository. ${q("gitlab-rebase")} must be used inside a Git repo.`);
     }
-  } catch {
-    throw new Error(`Not a Git repository. ${q("gitlab-rebase")} must be used inside a Git repo.`);
+  });
+  if (verbose) {
+    console.log(`Current commit: ${q(headShort)}`);
   }
 }
 

@@ -1,5 +1,6 @@
 import { render, Text, Box } from "ink";
 import SelectInput from "ink-select-input";
+import Spinner from "ink-spinner";
 import TextInput from "ink-text-input";
 import { useState } from "react";
 import type { FC } from "react";
@@ -9,10 +10,16 @@ interface Item {
   value: string;
 }
 
-export async function withProgress(message: string, fn: () => Promise<void>): Promise<void> {
-  const { unmount, clear } = render(<Text>{message}</Text>, { stdout: process.stderr as NodeJS.WriteStream });
+export async function withProgress<T>(message: string, fn: () => Promise<T>): Promise<T> {
+  const { unmount, clear } = render(
+    <Text>
+      <Spinner type="sand" />
+      {message}
+    </Text>,
+    { stdout: process.stderr as NodeJS.WriteStream },
+  );
   try {
-    await fn();
+    return await fn();
   } finally {
     clear();
     unmount();

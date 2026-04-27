@@ -1009,7 +1009,7 @@ const STASH_PROMPT_SKIP_SELECTED =
 const STASH_PROGRESS = "Stashing changes...\n";
 const REBASE_PROGRESS = "Rebasing 1 commit onto `main`...\n";
 // git rebase prints "Rebasing (N/M)" per commit, then the final summary.
-const REBASE_SUCCESS = "Rebasing (1/1)\nSuccessfully rebased and updated refs/heads/feature.\n";
+const REBASE_SUCCESS = "Rebasing (1/1)\nSuccessfully rebased and updated `feature`.\n";
 // When baseSha equals target tip, git rebase --onto is a no-op.
 const REBASE_UPTODATE = "Current branch feature is up to date.\n";
 

@@ -70,7 +70,8 @@ export async function main(args: string[], opts: { cwd?: string; stdin?: NodeJS.
       rebaseOutput = (r.stdout.toString() + r.stderr.toString())
         .split(/\r\n|\r|\n/)
         .filter((l) => l.trim())
-        .join("\n");
+        .join("\n")
+        .replace(/refs\/heads\/(\S+?)([.,!;:]*)(\s|$)/g, (_, branch, punct, end) => q(branch) + punct + end);
       if (r.exitCode !== 0) {
         throw new Error(rebaseOutput);
       }

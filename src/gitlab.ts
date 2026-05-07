@@ -12,7 +12,7 @@ const MergeRequest = type({
   updated_at: "string",
 });
 
-const MRCommit = type({ id: "string", short_id: "string", title: "string" });
+const MRCommit = type({ id: "string", short_id: "string", title: "string", "authored_date?": "string" });
 
 const MergeRequestArray = MergeRequest.array();
 const MRCommitArray = MRCommit.array();

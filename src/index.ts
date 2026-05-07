@@ -5,6 +5,8 @@ import { readCache, writeCache, type MrsProjectCache } from "./storage";
 import { selectPrompt, withProgress } from "./manual/prompt";
 import { q } from "./format";
 import { typedRegExp } from "ts-regexp";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 export async function main(args: string[], opts: { cwd?: string; stdin?: NodeJS.ReadableStream } = {}): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
@@ -33,45 +35,96 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
 
   const baseSha = await getBaseSha(cwd, target);
 
-  const [currentBranch, currentBranchShas, mergedCommitIds] = await Promise.all([
+  const [currentBranch, currentBranchCommits, mergedMatcher, targetCommits] = await Promise.all([
     getCurrentBranch(cwd),
-    getCurrentBranchShas(cwd, baseSha),
-    getAllAlreadyMergedCommits(cwd, baseSha, projectId, target, auth, verbose),
+    getCurrentBranchCommits(cwd, baseSha),
+    getMergedCommitMatcher(cwd, baseSha, projectId, target, auth, verbose),
+    getCommitsBetween(cwd, baseSha, target),
   ]);
-  // const currentBranchShaSet = new Set(currentBranchShas);
 
-  if (currentBranchShas.length === 0) {
+  // Stacked-branch case: when the target branch has its own commits ahead of the
+  // merge-base (e.g. a parent feature branch in a stacked-MR setup), treat those
+  // commits as "already on target" so we can match them on the current branch
+  // and skip them. Match by (author date, title) so a rebased target branch
+  // (with new SHAs) still matches the current branch's pre-rebase ancestors.
+  for (const c of targetCommits) matcherAdd(mergedMatcher, c.sha, c.authoredDate, c.title);
+
+  if (currentBranchCommits.length === 0) {
     throw new Error(`No commits on branch ${q(currentBranch)} ahead of ${q(target)}.`);
   }
 
   // Re-check current branch; stash/update steps could in principle change it.
-  if (currentBranch !== target) {
-    // Find the oldest non-merged commit; everything from its parent onward gets rebased.
-    const reversedShas = [...currentBranchShas].reverse();
-    const firstNonMergedIdx = reversedShas.findIndex((sha) => !mergedCommitIds.has(sha));
-    const rebaseUpstream = reversedShas[firstNonMergedIdx - 1] ?? baseSha;
+  if (currentBranch === target) return;
 
-    const alreadyMergedCount = firstNonMergedIdx === -1 ? currentBranchShas.length : firstNonMergedIdx;
-    const willRebaseCount = currentBranchShas.length - alreadyMergedCount;
+  // currentBranchCommits is newest-first (git log default). Walk oldest-first
+  // so we can reason about "first non-merged commit" naturally.
+  const oldestFirst = [...currentBranchCommits].reverse();
+  const keepFlags = oldestFirst.map((c) => !matcherHas(mergedMatcher, c));
+  const willRebaseCount = keepFlags.filter(Boolean).length;
+  const alreadyMergedCount = oldestFirst.length - willRebaseCount;
 
-    if (willRebaseCount === 0) {
-      const n = alreadyMergedCount;
-      const [commitNoun, haveVerb] = n === 1 ? ["commit", "has"] : ["commits", "have"];
-      throw new Error(
-        `The ${n} ${commitNoun} on branch ${q(currentBranch)} ${haveVerb} already been merged to ${q(target)}.`,
-      );
-    }
+  if (willRebaseCount === 0) {
+    const n = alreadyMergedCount;
+    const [commitNoun, haveVerb] = n === 1 ? ["commit", "has"] : ["commits", "have"];
+    throw new Error(
+      `The ${n} ${commitNoun} on branch ${q(currentBranch)} ${haveVerb} already been merged to ${q(target)}.`,
+    );
+  }
 
-    const willRebaseStr = `${willRebaseCount} ${willRebaseCount === 1 ? "commit" : "commits"}`;
-    const mergedSuffix =
-      alreadyMergedCount > 0
-        ? ` ${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit has" : "commits have"} already been merged to ${q(target)}.`
-        : "";
-    console.log(`Rebasing ${q(currentBranch)} onto ${q(target)}.${mergedSuffix} Will rebase ${willRebaseStr}.`);
+  const willRebaseStr = `${willRebaseCount} ${willRebaseCount === 1 ? "commit" : "commits"}`;
+  const mergedSuffix =
+    alreadyMergedCount > 0
+      ? ` ${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit has" : "commits have"} already been merged to ${q(target)}.`
+      : "";
+  console.log(`Rebasing ${q(currentBranch)} onto ${q(target)}.${mergedSuffix} Will rebase ${willRebaseStr}.`);
 
-    let rebaseOutput = "";
+  // When every merged commit forms a contiguous prefix (or there are none at
+  // all) we can use a plain `git rebase --onto target upstream`. Otherwise we
+  // do a single interactive rebase whose todo list has the merged commits'
+  // `pick` lines rewritten to `drop` by a sequence editor we control. Either
+  // way, gitlab-rebase invokes git rebase exactly once.
+  const firstKeptIdx = keepFlags.findIndex(Boolean);
+  const allMergedAtStart = keepFlags.slice(firstKeptIdx).every(Boolean);
+
+  if (allMergedAtStart) {
+    const rebaseUpstream = oldestFirst[firstKeptIdx - 1]?.sha ?? baseSha;
+    await runRebase(cwd, target, rebaseUpstream, willRebaseStr, [], []);
+  } else {
+    const dropShas = oldestFirst.filter((_, i) => !keepFlags[i]).map((c) => c.sha);
+    const allShas = oldestFirst.map((c) => c.sha);
+    await runRebase(cwd, target, baseSha, willRebaseStr, allShas, dropShas);
+  }
+}
+
+async function runRebase(
+  cwd: string,
+  target: string,
+  upstream: string,
+  willRebaseStr: string,
+  allShas: string[],
+  dropShas: string[],
+): Promise<void> {
+  let todoDir: string | null = null;
+  let rebaseOutput = "";
+  try {
     await withProgress(`Rebasing ${willRebaseStr} onto ${q(target)}...`, async () => {
-      const r = await Bun.$`git rebase --onto ${target} ${rebaseUpstream}`.cwd(cwd).quiet().nothrow();
+      let cmd = Bun.$`git rebase --onto ${target} ${upstream}`.cwd(cwd);
+      if (dropShas.length > 0) {
+        const todo = await writeRebaseTodo(allShas, dropShas);
+        todoDir = todo.dir;
+        cmd = Bun.$`git rebase -i --onto ${target} ${upstream}`.cwd(cwd).env({
+          ...process.env,
+          // Git appends the path of its own todo file as the final argument
+          // to GIT_SEQUENCE_EDITOR. Using `cp <ourTodo>` as the "editor"
+          // makes git overwrite its todo with the picks/drops we already
+          // computed — no editor process, no Bun runtime, no string munging.
+          GIT_SEQUENCE_EDITOR: `cp ${todo.path}`,
+          // Safety: pick/drop never invoke a per-commit editor, but if
+          // anything ever did, don't launch vi.
+          GIT_EDITOR: "true",
+        });
+      }
+      const r = await cmd.quiet().nothrow();
       // git rebase uses bare \r to overwrite progress lines. Split on any
       // line ending (\r\n, \r, \n) so Windows output is handled correctly,
       // then drop whitespace-only lines.
@@ -84,10 +137,21 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
         throw new Error(rebaseOutput);
       }
     });
-    if (rebaseOutput) {
-      process.stderr.write(rebaseOutput + "\n");
-    }
+  } finally {
+    if (todoDir) rmSync(todoDir, { recursive: true, force: true });
   }
+  if (rebaseOutput) process.stderr.write(rebaseOutput + "\n");
+}
+
+async function writeRebaseTodo(allShas: string[], dropShas: string[]): Promise<{ dir: string; path: string }> {
+  const dropSet = new Set(dropShas);
+  // git rebase's pick/drop parser only reads the action and the SHA; subjects
+  // (the rest of the line) are decorative, so we omit them.
+  const lines = allShas.map((sha) => `${dropSet.has(sha) ? "drop" : "pick"} ${sha}`);
+  const dir = mkdtempSync("/tmp/gitlab-rebase-todo-");
+  const path = join(dir, "todo");
+  await Bun.write(path, lines.join("\n") + "\n");
+  return { dir, path };
 }
 
 function maxIsoDateString(a: string, b: string): string {
@@ -109,19 +173,49 @@ function mergeRequestFetchSince(baseDate: string, cache: MrsProjectCache | null)
   return maxIsoDateString(baseDate, newest);
 }
 
-async function getAllAlreadyMergedCommits(
+interface CommitInfo {
+  sha: string;
+  authoredDate: string;
+  title: string;
+}
+
+interface CommitMatcher {
+  shas: Set<string>;
+  dateTitles: Set<string>;
+}
+
+function newMatcher(): CommitMatcher {
+  return { shas: new Set(), dateTitles: new Set() };
+}
+
+// Match by `${authoredDate} ${title}` so a rebased copy of a commit (new SHA,
+// same author identity and message) is recognised as the "same" commit.
+function matcherAdd(m: CommitMatcher, sha: string, authoredDate: string | undefined, title: string): void {
+  m.shas.add(sha);
+  if (authoredDate) m.dateTitles.add(`${authoredDate} ${title}`);
+}
+
+function matcherHas(m: CommitMatcher, c: CommitInfo): boolean {
+  return m.shas.has(c.sha) || m.dateTitles.has(`${c.authoredDate} ${c.title}`);
+}
+
+async function getMergedCommitMatcher(
   cwd: string,
   baseSha: string,
   projectId: string,
   target: string,
   auth: GitLabAuth,
   verbose: boolean,
-) {
-  const relevantMRs = await fetchRelevantMergedMRs(cwd, baseSha, projectId, target, auth, verbose);
-  return new Set(relevantMRs.flatMap(({ commits }) => commits.map(({ id }) => id)));
+): Promise<CommitMatcher> {
+  const mrs = await fetchMergedMRsForMatching(cwd, baseSha, projectId, target, auth, verbose);
+  const matcher = newMatcher();
+  for (const { commits } of mrs) {
+    for (const c of commits) matcherAdd(matcher, c.id, c.authored_date, c.title);
+  }
+  return matcher;
 }
 
-async function fetchRelevantMergedMRs(
+async function fetchMergedMRsForMatching(
   cwd: string,
   baseSha: string,
   projectId: string,
@@ -139,18 +233,23 @@ async function fetchRelevantMergedMRs(
   const allMrs = [...byIid.values()].sort((a, b) => b.mr.iid - a.mr.iid);
   await writeCache(projectId, allMrs, baseDate);
 
-  const relevantMRs = allMrs.filter(
-    ({ mr }) => mr.merged_at !== null && mr.target_branch === target && new Date(mr.merged_at) >= new Date(baseDate),
-  );
+  // For matching, consider every merged MR newer than baseDate, regardless of
+  // its target_branch. When the user rebases onto a stacked feature branch
+  // (target != main), MRs that were merged to main are still relevant — their
+  // commits are in main, which is an ancestor of the target.
+  const matchingMRs = allMrs.filter(({ mr }) => mr.merged_at !== null && new Date(mr.merged_at) >= new Date(baseDate));
   if (verbose) {
-    for (const { mr, commits } of relevantMRs) {
+    // Verbose listing only shows MRs that landed directly on the target branch,
+    // so output stays focused on what the user explicitly asked to rebase onto.
+    for (const { mr, commits } of matchingMRs) {
+      if (mr.target_branch !== target) continue;
       console.log(`!${mr.iid} ${mr.title}`);
       for (const commit of commits) {
         console.log(`  ${commit.short_id} ${commit.title}`);
       }
     }
   }
-  return relevantMRs;
+  return matchingMRs;
 }
 
 async function checkAndStashDirtyChanges(cwd: string, stdin?: NodeJS.ReadableStream): Promise<void> {
@@ -266,13 +365,30 @@ async function getCurrentBranch(cwd: string): Promise<string> {
   return (await Bun.$`git rev-parse --abbrev-ref HEAD`.cwd(cwd).quiet().text()).trim();
 }
 
-async function getCurrentBranchShas(cwd: string, baseSha: string): Promise<string[]> {
-  const out = (await Bun.$`git log ${baseSha}..HEAD --format=%H`.cwd(cwd).quiet().text()).trim();
-  if (!out) return [];
+async function getCurrentBranchCommits(cwd: string, baseSha: string): Promise<CommitInfo[]> {
+  return logCommitInfos(cwd, `${baseSha}..HEAD`);
+}
+
+async function getCommitsBetween(cwd: string, fromSha: string, toRef: string): Promise<CommitInfo[]> {
+  return logCommitInfos(cwd, `${fromSha}..${toRef}`);
+}
+
+const LOG_FIELD_SEP = "\x1f";
+const LOG_RECORD_SEP = "\x1e";
+
+async function logCommitInfos(cwd: string, range: string): Promise<CommitInfo[]> {
+  const format = `%H${LOG_FIELD_SEP}%aI${LOG_FIELD_SEP}%s${LOG_RECORD_SEP}`;
+  const r = await Bun.$`git log ${range} --format=${format}`.cwd(cwd).quiet().nothrow();
+  if (r.exitCode !== 0) return [];
+  const out = r.stdout.toString();
   return out
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
+    .split(LOG_RECORD_SEP)
+    .map((rec) => rec.trim())
+    .filter(Boolean)
+    .map((rec) => {
+      const [sha, authoredDate, title] = rec.split(LOG_FIELD_SEP);
+      return { sha: sha!, authoredDate: authoredDate!, title: title ?? "" };
+    });
 }
 
 async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {

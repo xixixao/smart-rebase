@@ -1244,3 +1244,239 @@ test("exits with error when upstream tracking branch has unexpected format", asy
   expect(stdout).toBe("Rebasing onto branch `main`.\n");
   expect(stderr).toBe("Unexpected upstream format: feature\n");
 });
+
+// --- author-date+title commit matching tests ---
+
+/** Commit with explicit author/committer dates so date-based matching is deterministic. */
+async function commitWithDate(
+  cwd: string,
+  message: string,
+  date: string,
+  opts: { allowEmpty?: boolean; file?: { name: string; content: string } } = {},
+): Promise<string> {
+  if (opts.file) {
+    await Bun.write(join(cwd, opts.file.name), opts.file.content);
+    await Bun.$`git add ${opts.file.name}`.cwd(cwd).quiet();
+  }
+  const env = { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date };
+  if (opts.allowEmpty) {
+    await Bun.$`git commit --allow-empty -m ${message}`.cwd(cwd).env(env).quiet();
+  } else {
+    await Bun.$`git commit -m ${message}`.cwd(cwd).env(env).quiet();
+  }
+  return (await Bun.$`git rev-parse HEAD`.cwd(cwd).text()).trim();
+}
+
+const D_A1 = "2020-06-01T10:00:00+00:00";
+const D_A2 = "2020-06-02T10:00:00+00:00";
+const D_B1 = "2020-06-03T10:00:00+00:00";
+const D_B2 = "2020-06-04T10:00:00+00:00";
+
+test("scenario 1: matches MR commits by author-date and title when SHAs differ", async () => {
+  // Mirrors the GitLab "rebase A onto main" flow: A's MR commits have new SHAs
+  // (the rebase rewrote them) but the same author dates and titles. Locally, B
+  // still has the pre-rebase versions of A's commits. Matching by SHA fails;
+  // matching by (author date, title) recognises them as already merged.
+  const repoPath = await makeGitRepo();
+  await Bun.$`git checkout -b feature-b`.cwd(repoPath).quiet();
+  await commitWithDate(repoPath, "feat: a1", D_A1, { allowEmpty: true });
+  await commitWithDate(repoPath, "feat: a2", D_A2, { allowEmpty: true });
+  await commitWithDate(repoPath, "feat: b1", D_B1, { allowEmpty: true });
+  await commitWithDate(repoPath, "feat: b2", D_B2, { allowEmpty: true });
+  await Bun.$`git checkout main`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "main moved"`.cwd(repoPath).quiet();
+  await Bun.$`git checkout feature-b`.cwd(repoPath).quiet();
+
+  // GitLab returns A's rebased commits — different SHAs, same dates/titles.
+  mockMRs = [{ iid: 1, title: "MR A", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(1, [
+    { id: "a".repeat(40), short_id: "aaaaaaaa", title: "feat: a1", authored_date: D_A1 },
+    { id: "b".repeat(40), short_id: "bbbbbbbb", title: "feat: a2", authored_date: D_A2 },
+  ]);
+
+  const { stdout, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain(
+    "Rebasing `feature-b` onto `main`. 2 commits have already been merged to `main`. Will rebase 2 commits.\n",
+  );
+  // Only b1 and b2 remain on the rebased branch.
+  const log = (await Bun.$`git log --format=%s ${"main"}..HEAD`.cwd(repoPath).text()).trim().split("\n");
+  expect(log).toEqual(["feat: b2", "feat: b1"]);
+});
+
+test("scenario 2: matches commits against a local target branch (stacked rebase)", async () => {
+  // No GitLab merged MR is involved here — the user already locally rebased A
+  // onto a newer main, so A's commits have new SHAs. B (still based on old A)
+  // is rebased with `gitlab-rebase a`. Without target-branch matching this
+  // would re-apply A's commits and produce duplicates or conflicts.
+  const repoPath = await makeGitRepo();
+
+  // Branch A: a1 then a2, with the canonical (date, title) pairs.
+  await Bun.$`git checkout -b feature-a`.cwd(repoPath).quiet();
+  await commitWithDate(repoPath, "feat: a1", D_A1, { allowEmpty: true });
+  await commitWithDate(repoPath, "feat: a2", D_A2, { allowEmpty: true });
+
+  // Branch B forks off A and adds b1, b2.
+  await Bun.$`git checkout -b feature-b`.cwd(repoPath).quiet();
+  await commitWithDate(repoPath, "feat: b1", D_B1, { allowEmpty: true });
+  await commitWithDate(repoPath, "feat: b2", D_B2, { allowEmpty: true });
+
+  // Simulate "user rebased A locally": main moves forward, then A's commits
+  // are recreated on top with brand-new SHAs but identical dates/titles.
+  await Bun.$`git checkout main`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "main moved"`.cwd(repoPath).quiet();
+  await Bun.$`git branch -f feature-a HEAD`.cwd(repoPath).quiet();
+  await Bun.$`git checkout feature-a`.cwd(repoPath).quiet();
+  await commitWithDate(repoPath, "feat: a1", D_A1, { allowEmpty: true });
+  await commitWithDate(repoPath, "feat: a2", D_A2, { allowEmpty: true });
+
+  // Now rebase B onto the rebased A.
+  await Bun.$`git checkout feature-b`.cwd(repoPath).quiet();
+  const { stdout, exitCode } = await run(["feature-a"], { cwd: repoPath });
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain(
+    "Rebasing `feature-b` onto `feature-a`. 2 commits have already been merged to `feature-a`. Will rebase 2 commits.\n",
+  );
+  // B is now strictly A + b1 + b2.
+  const aTip = (await Bun.$`git rev-parse feature-a`.cwd(repoPath).text()).trim();
+  const bParent = (await Bun.$`git rev-parse HEAD~2`.cwd(repoPath).text()).trim();
+  expect(bParent).toBe(aTip);
+  const log = (await Bun.$`git log --format=%s feature-a..HEAD`.cwd(repoPath).text()).trim().split("\n");
+  expect(log).toEqual(["feat: b2", "feat: b1"]);
+});
+
+test("scenario 3: combines GitLab merged-MR matching with local target matching", async () => {
+  // Setup mirrors a stacked-MR workflow:
+  // - C is squash-merged on main (matched via GitLab merged MR).
+  // - A is locally rebased onto the new main (matched via local target branch).
+  // - B still carries the pre-rebase versions of both C's and A's commits.
+  // Both matching kinds must compose so B drops C's *and* A's old commits.
+  const D_C1 = "2020-05-01T10:00:00+00:00";
+  const D_C2 = "2020-05-02T10:00:00+00:00";
+
+  const repoPath = await makeGitRepo();
+
+  // Original feature branch tree: main → c1, c2 → a1, a2 → b1, b2.
+  await Bun.$`git checkout -b feature-c`.cwd(repoPath).quiet();
+  const c1OldSha = await commitWithDate(repoPath, "feat: c1", D_C1, { allowEmpty: true });
+  const c2OldSha = await commitWithDate(repoPath, "feat: c2", D_C2, { allowEmpty: true });
+  await Bun.$`git checkout -b feature-a`.cwd(repoPath).quiet();
+  await commitWithDate(repoPath, "feat: a1", D_A1, { allowEmpty: true });
+  await commitWithDate(repoPath, "feat: a2", D_A2, { allowEmpty: true });
+  await Bun.$`git checkout -b feature-b`.cwd(repoPath).quiet();
+  await commitWithDate(repoPath, "feat: b1", D_B1, { allowEmpty: true });
+  await commitWithDate(repoPath, "feat: b2", D_B2, { allowEmpty: true });
+
+  // C is squash-merged to main (single squash commit).
+  await Bun.$`git checkout main`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "C squashed"`.cwd(repoPath).quiet();
+
+  // A is locally rebased onto new main → new SHAs for a1', a2' but same
+  // (date, title). C's commits no longer appear on A's rebased history.
+  await Bun.$`git branch -f feature-a HEAD`.cwd(repoPath).quiet();
+  await Bun.$`git checkout feature-a`.cwd(repoPath).quiet();
+  await commitWithDate(repoPath, "feat: a1", D_A1, { allowEmpty: true });
+  await commitWithDate(repoPath, "feat: a2", D_A2, { allowEmpty: true });
+
+  // Mock GitLab so the merged MR for C lists its original commits.
+  mockMRs = [{ iid: 99, title: "MR C", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(99, [
+    { id: c1OldSha, short_id: c1OldSha.slice(0, 8), title: "feat: c1", authored_date: D_C1 },
+    { id: c2OldSha, short_id: c2OldSha.slice(0, 8), title: "feat: c2", authored_date: D_C2 },
+  ]);
+
+  await Bun.$`git checkout feature-b`.cwd(repoPath).quiet();
+  const { stdout, exitCode } = await run(["feature-a"], { cwd: repoPath });
+  expect(exitCode).toBe(0);
+  // 4 commits dropped: c1 and c2 (via GitLab MR) + a1 and a2 (via target branch).
+  expect(stdout).toContain(
+    "Rebasing `feature-b` onto `feature-a`. 4 commits have already been merged to `feature-a`. Will rebase 2 commits.\n",
+  );
+  const aTip = (await Bun.$`git rev-parse feature-a`.cwd(repoPath).text()).trim();
+  const bParent = (await Bun.$`git rev-parse HEAD~2`.cwd(repoPath).text()).trim();
+  expect(bParent).toBe(aTip);
+  const log = (await Bun.$`git log --format=%s feature-a..HEAD`.cwd(repoPath).text()).trim().split("\n");
+  expect(log).toEqual(["feat: b2", "feat: b1"]);
+});
+
+test("scenario 4: drops squash-merged middle commits matched by author-date+title", async () => {
+  // Stack: main → A1, A2 → B1, B2 → C1, C2 (locally on feature-c).
+  // Real flow: to squash-merge B without A's changes, the user first locally
+  // rebased feature-b onto main (so B has *new* SHAs but the same author
+  // dates/titles), pushed, and merged. GitLab's MR commit list for B now
+  // contains those rebased SHAs — none of which exist on feature-c.
+  // gitlab-rebase on feature-c must therefore match B by (author date, title)
+  // and drop B's commits from the *middle* of the branch.
+  const repoPath = await makeGitRepo();
+  await Bun.$`git checkout -b feature-c`.cwd(repoPath).quiet();
+  await commitWithDate(repoPath, "feat: a1", D_A1, { file: { name: "a1.txt", content: "a1\n" } });
+  await commitWithDate(repoPath, "feat: a2", D_A2, { file: { name: "a2.txt", content: "a2\n" } });
+  await commitWithDate(repoPath, "feat: b1", D_B1, { file: { name: "b1.txt", content: "b1\n" } });
+  await commitWithDate(repoPath, "feat: b2", D_B2, { file: { name: "b2.txt", content: "b2\n" } });
+  await commitWithDate(repoPath, "feat: c1", "2020-06-05T10:00:00+00:00", {
+    file: { name: "c1.txt", content: "c1\n" },
+  });
+  await commitWithDate(repoPath, "feat: c2", "2020-06-06T10:00:00+00:00", {
+    file: { name: "c2.txt", content: "c2\n" },
+  });
+
+  // Simulate the squash-merge of the rebased B on main.
+  await Bun.$`git checkout main`.cwd(repoPath).quiet();
+  await Bun.write(join(repoPath, "b-squash.txt"), "b squashed\n");
+  await Bun.$`git add b-squash.txt`.cwd(repoPath).quiet();
+  await Bun.$`git commit -m "MR B (squashed)"`.cwd(repoPath).quiet();
+  await Bun.$`git checkout feature-c`.cwd(repoPath).quiet();
+
+  // GitLab's view of B: rebased SHAs (different from anything on feature-c)
+  // but the same author dates and titles as the original B commits.
+  mockMRs = [{ iid: 7, title: "MR B", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(7, [
+    { id: "b".repeat(40), short_id: "bbbbbbb1", title: "feat: b1", authored_date: D_B1 },
+    { id: "1".repeat(40), short_id: "11111111", title: "feat: b2", authored_date: D_B2 },
+  ]);
+
+  const { stdout, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain(
+    "Rebasing `feature-c` onto `main`. 2 commits have already been merged to `main`. Will rebase 4 commits.\n",
+  );
+  // After the rebase: main's tip → A1' → A2' → C1' → C2'. B's commits are gone.
+  const log = (await Bun.$`git log --format=%s main..HEAD`.cwd(repoPath).text()).trim().split("\n");
+  expect(log).toEqual(["feat: c2", "feat: c1", "feat: a2", "feat: a1"]);
+  const headParent = (await Bun.$`git rev-parse HEAD~4`.cwd(repoPath).text()).trim();
+  const mainTip = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
+  expect(headParent).toBe(mainTip);
+});
+
+test("scenario 4: middle-drop interactive rebase reports conflicts like a regular rebase", async () => {
+  // Same shape as scenario 4, but the kept commit conflicts with content
+  // already on main. We expect git's standard rebase failure: the worktree
+  // is left mid-rebase so the user can resolve and `git rebase --continue`,
+  // exactly like a non-interactive rebase conflict.
+  const repoPath = await makeGitRepo();
+  await Bun.$`git checkout -b feature-c`.cwd(repoPath).quiet();
+  // A1 modifies a file; main will modify the same file with different content.
+  await commitWithDate(repoPath, "feat: a1", D_A1, { file: { name: "shared.txt", content: "from feature\n" } });
+  await commitWithDate(repoPath, "feat: b1", D_B1, { file: { name: "b1.txt", content: "b1\n" } });
+  await commitWithDate(repoPath, "feat: c1", "2020-06-05T10:00:00+00:00", {
+    file: { name: "c1.txt", content: "c1\n" },
+  });
+
+  // Main writes a conflicting version of shared.txt.
+  await Bun.$`git checkout main`.cwd(repoPath).quiet();
+  await Bun.write(join(repoPath, "shared.txt"), "from main\n");
+  await Bun.$`git add shared.txt`.cwd(repoPath).quiet();
+  await Bun.$`git commit -m "main writes shared"`.cwd(repoPath).quiet();
+  await Bun.$`git checkout feature-c`.cwd(repoPath).quiet();
+
+  // GitLab MR for B uses a rebased SHA — matching falls through to
+  // (author date, title), exercising the same code path as the happy case.
+  mockMRs = [{ iid: 7, title: "MR B", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(7, [{ id: "b".repeat(40), short_id: "bbbbbbb1", title: "feat: b1", authored_date: D_B1 }]);
+
+  const { exitCode, stderr } = await run([], { cwd: repoPath });
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("CONFLICT");
+  // Clean up mid-rebase state so the temp dir is usable.
+  await Bun.$`git rebase --abort`.cwd(repoPath).quiet().nothrow();
+});

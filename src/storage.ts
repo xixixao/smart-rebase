@@ -6,9 +6,9 @@ import { getGitlabUrl } from "./gitlab";
 import { getDataDir } from "./paths";
 import { q } from "./format";
 
-const CACHE_VERSION = 5;
+const CACHE_VERSION = 6;
 
-const CachedCommit = type({ id: "string", short_id: "string", title: "string" });
+const CachedCommit = type({ id: "string", short_id: "string", title: "string", "authored_date?": "string" });
 
 const CachedMR = type({
   iid: "number",

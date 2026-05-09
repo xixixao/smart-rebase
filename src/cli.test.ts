@@ -817,6 +817,7 @@ test("accepts custom target branch as positional arg", async () => {
   await Bun.$`git checkout -b release main`.cwd(repoPath).quiet();
   await Bun.$`git commit --allow-empty -m "release commit"`.cwd(repoPath).quiet();
   await Bun.$`git checkout feature`.cwd(repoPath).quiet();
+  await addMainTrackingRemote(repoPath, ["release"]);
 
   mockMRs = [{ iid: 5, title: "Release MR", target_branch: "release", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(5, [{ id: mergedSha, short_id: mergedSha.slice(0, 8), title: "merged feature work" }]);
@@ -1020,11 +1021,13 @@ async function makeRepoWithRemoteAhead(): Promise<{ repoPath: string; remoteNewS
   return { repoPath: localPath, remoteNewSha };
 }
 
-test("shows no update prompt when target has no upstream tracking", async () => {
-  const { stderr, stdout, exitCode } = await run([]);
-  expect(exitCode).toBe(0);
-  expect(stderr).toBe(REBASE_PROGRESS + REBASE_SUCCESS);
-  expect(stdout.trim()).toBe(DEFAULT_STDOUT);
+test("exits with error when target branch has no upstream tracking", async () => {
+  const repoPath = await makeGitRepo();
+  const { stderr, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).not.toBe(0);
+  expect(stderr.trim()).toBe(
+    "Branch `main` isn't tracking an upstream branch. Use something like: `git branch --set-upstream-to=origin/main main`",
+  );
 });
 
 test("shows no update prompt when target is already up to date with remote", async () => {

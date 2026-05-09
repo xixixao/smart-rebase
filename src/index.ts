@@ -281,7 +281,10 @@ async function checkAndUpdateTargetBranch(cwd: string, target: string, stdin?: N
   try {
     upstream = (await Bun.$`git rev-parse --abbrev-ref ${target}@{u}`.cwd(cwd).quiet().text()).trim();
   } catch {
-    return;
+    throw new Error(
+      `Branch ${q(target)} isn't tracking an upstream branch. ` +
+        `Use something like: ${q(`git branch --set-upstream-to=origin/${target} ${target}`)}`,
+    );
   }
 
   const upstreamMatch = typedRegExp("^(?<remoteName>[^/]+)/(?<remoteBranch>.+)$").matchIn(upstream);

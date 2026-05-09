@@ -23,16 +23,41 @@ export function isInteractive(): boolean {
   return process.argv.includes("--interactive");
 }
 
+// SIGINT handling: when the user hits Ctrl-C, run the currently-active
+// scenario's cleanup before exiting so we don't leak a remote GitLab project.
+// In non-interactive mode the default SIGINT terminates the process before
+// `runScenario`'s finally block fires; this handler bridges that gap.
+let activeCleanup: (() => Promise<void>) | null = null;
+let sigintHandled = false;
+
+process.on("SIGINT", () => {
+  if (sigintHandled) {
+    // Second Ctrl-C: don't wait for cleanup, exit now.
+    process.stderr.write(`\n${RED}✗ Forcing exit (cleanup may be incomplete)${RESET}\n`);
+    process.exit(130);
+  }
+  sigintHandled = true;
+  void runSigintCleanup();
+});
+
+async function runSigintCleanup(): Promise<void> {
+  process.stderr.write(`\n${RED}✗ Interrupted — cleaning up...${RESET}\n`);
+  const cleanup = activeCleanup;
+  activeCleanup = null;
+  if (cleanup) {
+    try {
+      await cleanup();
+    } catch (e) {
+      process.stderr.write(`Cleanup error: ${e instanceof Error ? e.message : String(e)}\n`);
+    }
+  }
+  process.exit(130);
+}
+
 async function waitForEnter(): Promise<void> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  await new Promise<void>((resolve, reject) => {
-    const onSigint = () => {
-      rl.close();
-      reject(new Error("Interrupted"));
-    };
-    process.once("SIGINT", onSigint);
+  await new Promise<void>((resolve) => {
     rl.question("", () => {
-      process.removeListener("SIGINT", onSigint);
       rl.close();
       resolve();
     });
@@ -97,8 +122,29 @@ export async function setupScenario(scenarioName: string): Promise<SetupResult> 
   console.log(`  project:      ${projectPath}`);
   console.log(`  work dir:     ${workDir}`);
 
+  // Idempotent cleanup so that both the SIGINT path and the normal finally
+  // path can call it without doing the work twice. `projectCreated` gates the
+  // remote-delete: if SIGINT fires before the project is created we shouldn't
+  // even try to delete (and we won't print the warning about it).
+  let didCleanup = false;
+  let projectCreated = false;
+  const cleanup = async () => {
+    if (didCleanup) return;
+    didCleanup = true;
+    rmSync(workDir, { recursive: true, force: true });
+    if (!projectCreated) return;
+    try {
+      await glabApi(`projects/${encodeProject(projectPath)}`, ["-X", "DELETE"]);
+    } catch {
+      console.warn(`  warning: could not delete remote repo ${projectPath} — delete it manually`);
+    }
+  };
+  // Register *before* creating the remote project so a SIGINT during creation
+  // still triggers cleanup of the workDir (and of the project once it exists).
+  activeCleanup = cleanup;
+
   await step(`Create GitLab repo: ${repoName}`, async () => {
-    await glabApi("projects", [
+    const created = (await glabApi("projects", [
       "-X",
       "POST",
       "-f",
@@ -107,7 +153,9 @@ export async function setupScenario(scenarioName: string): Promise<SetupResult> 
       "visibility=private",
       "-f",
       "initialize_with_readme=false",
-    ]);
+    ])) as { web_url?: string };
+    projectCreated = true;
+    if (created.web_url) console.log(`  url:          ${created.web_url}`);
     // Fast-forward-only merges so squash merges land a single commit on main
     // with no merge-commit — that's the shape gitlab-rebase is designed for.
     await glabApi(`projects/${encodeProject(projectPath)}`, ["-X", "PUT", "-f", "merge_method=ff"]);
@@ -124,14 +172,6 @@ export async function setupScenario(scenarioName: string): Promise<SetupResult> 
   });
 
   const ctx: E2EContext = { repoDir, projectPath, entryScript, workDir, scenarioName };
-  const cleanup = async () => {
-    rmSync(workDir, { recursive: true, force: true });
-    try {
-      await glabApi(`projects/${encodeProject(projectPath)}`, ["-X", "DELETE"]);
-    } catch {
-      console.warn(`  warning: could not delete remote repo ${projectPath} — delete it manually`);
-    }
-  };
   return { ctx, cleanup };
 }
 
@@ -252,6 +292,11 @@ export interface Scenario {
 
 /** Runs a scenario with full setup/teardown around it. */
 export async function runScenario(scenario: Scenario): Promise<boolean> {
+  // If SIGINT cleanup is in flight (from this or a previous scenario), don't
+  // start any new work. Block forever so the loop can't advance; the SIGINT
+  // handler will call process.exit when its cleanup completes.
+  if (sigintHandled) await blockUntilExit();
+
   console.log(`\n${BOLD_BLUE}━━━ ${scenario.name} ━━━${RESET}`);
   console.log(`${DIM}${scenario.description}${RESET}`);
   let cleanup: (() => Promise<void>) | null = null;
@@ -262,6 +307,10 @@ export async function runScenario(scenario: Scenario): Promise<boolean> {
     console.log(`\n${GREEN}✓ ${scenario.name} passed${RESET}`);
     return true;
   } catch (e) {
+    // SIGINT typically reaches here as a child-process exit-130 rejection.
+    // Suppress the misleading "scenario failed" output and let the SIGINT
+    // handler drive cleanup + exit.
+    if (sigintHandled) await blockUntilExit();
     console.error(`\n${RED}✗ ${scenario.name} failed:${RESET}`);
     console.error(e instanceof Error ? e.message : String(e));
     if (e != null && typeof e === "object") {
@@ -273,8 +322,16 @@ export async function runScenario(scenario: Scenario): Promise<boolean> {
     if (e instanceof Error && e.stack) console.error(e.stack);
     return false;
   } finally {
-    if (cleanup) {
+    if (cleanup && !sigintHandled) {
+      // Clear the SIGINT-driven cleanup hook before invoking cleanup
+      // ourselves. (When sigintHandled is set we never reach here — the catch
+      // block above blocks forever — so the SIGINT handler owns cleanup.)
+      activeCleanup = null;
       await step("Cleanup", cleanup);
     }
   }
+}
+
+function blockUntilExit(): Promise<never> {
+  return new Promise<never>(() => {});
 }

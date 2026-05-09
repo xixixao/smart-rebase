@@ -252,6 +252,27 @@ export async function gitlabRebaseMR(ctx: E2EContext, iid: number): Promise<void
 }
 
 export async function mergeMR(ctx: E2EContext, iid: number, opts: { squash?: boolean } = {}): Promise<void> {
+  // After a (force-)push, GitLab takes a moment to recompute the MR's
+  // merge_status. Calling /merge while it's still "checking" returns 405, and
+  // GitLab will transiently report "preparing" or even a stale "conflict"
+  // immediately after a force-push, so poll until it settles on "mergeable".
+  const transient = new Set(["checking", "unchecked", "preparing", "conflict"]);
+  let lastStatus = "";
+  for (let i = 0; i < 60; i++) {
+    const mr = (await glabApi(
+      `projects/${encodeProject(ctx.projectPath)}/merge_requests/${iid}`,
+    )) as { detailed_merge_status?: string; merge_status?: string };
+    const status = mr.detailed_merge_status ?? mr.merge_status ?? "";
+    lastStatus = status;
+    if (status === "mergeable" || status === "can_be_merged") break;
+    if (status && !transient.has(status)) {
+      throw new Error(`MR !${iid} is not mergeable: ${status}`);
+    }
+    await Bun.sleep(1000);
+  }
+  if (lastStatus !== "mergeable" && lastStatus !== "can_be_merged") {
+    throw new Error(`Timed out waiting for MR !${iid} to become mergeable (last: ${lastStatus})`);
+  }
   await glabApi(`projects/${encodeProject(ctx.projectPath)}/merge_requests/${iid}/merge`, [
     "-X",
     "PUT",

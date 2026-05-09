@@ -19,8 +19,12 @@ const GREEN = "\x1b[32m";
 const RED = "\x1b[1;31m";
 const DIM = "\x1b[2m";
 
+let interactive = false;
+export function setInteractive(value: boolean): void {
+  interactive = value;
+}
 export function isInteractive(): boolean {
-  return process.argv.includes("--interactive");
+  return interactive;
 }
 
 // SIGINT handling: when the user hits Ctrl-C, run the currently-active

@@ -15,12 +15,22 @@
  *   - GITLAB_TOKEN env var set (for gitlab-rebase itself)
  */
 
-import { runScenario, isInteractive } from "./helpers";
+import { parseArgs } from "util";
+import { runScenario, isInteractive, setInteractive } from "./helpers";
 import { allScenarios } from "./scenarios";
 
-const onlyFlag = process.argv.find((a) => a.startsWith("--only="));
-const onlyName = onlyFlag?.slice("--only=".length);
+const { values } = parseArgs({
+  args: process.argv.slice(2),
+  options: {
+    only: { type: "string" },
+    interactive: { type: "boolean" },
+  },
+  strict: true,
+});
 
+setInteractive(values.interactive ?? false);
+
+const onlyName = values.only;
 const scenarios = onlyName ? allScenarios.filter((s) => s.name === onlyName) : allScenarios;
 if (scenarios.length === 0) {
   console.error(`No scenarios match --only=${onlyName}.`);

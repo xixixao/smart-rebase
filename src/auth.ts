@@ -76,7 +76,7 @@ async function loadNetrc(machine: string): Promise<string | undefined> {
 }
 
 export async function getAuth(stdin?: NodeJS.ReadableStream): Promise<GitLabAuth> {
-  const saved = await withProgress("Checcking settings...", () => loadSettings());
+  const saved = await withProgress("Checking settings...", () => loadSettings());
 
   let token = process.env.GITLAB_TOKEN;
 

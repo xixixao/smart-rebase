@@ -11,6 +11,7 @@ interface Item {
 }
 
 export async function withProgress<T>(message: string, fn: () => Promise<T>): Promise<T> {
+  if (!process.stderr.isTTY) return fn();
   const { unmount, clear } = render(
     <Text>
       <Spinner type="sand" />

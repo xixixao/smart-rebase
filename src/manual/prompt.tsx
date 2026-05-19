@@ -14,8 +14,7 @@ export async function withProgress<T>(message: string, fn: () => Promise<T>): Pr
   if (!process.stderr.isTTY) return fn();
   const { unmount, clear } = render(
     <Text>
-      <Spinner type="sand" />
-      {message}
+      <Spinner type="sand" /> {message}
     </Text>,
     { stdout: process.stderr as NodeJS.WriteStream },
   );

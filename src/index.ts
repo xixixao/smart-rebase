@@ -3,7 +3,7 @@ import { getAuth, type GitLabAuth } from "./auth";
 import { fetchMergedMRsSince, type MRWithCommits, getGitlabUrl } from "./gitlab";
 import { readCache, writeCache, type MrsProjectCache } from "./storage";
 import { selectPrompt, withProgress } from "./manual/prompt";
-import { q } from "./format";
+import { pl, plc, q } from "./format";
 import { typedRegExp } from "ts-regexp";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -71,18 +71,19 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
 
   if (willRebaseCount === 0) {
     const n = alreadyMergedCount;
-    const [commitNoun, haveVerb] = n === 1 ? ["commit", "has"] : ["commits", "have"];
     throw new Error(
-      `The ${n} ${commitNoun} on branch ${q(currentBranch)} ${haveVerb} already been merged to ${q(target)}.`,
+      `The ${plc(n, "commit")} on branch ${q(currentBranch)} ${pl(n, "has")} already been merged to ${q(target)}.`,
     );
   }
 
-  const willRebaseStr = `${willRebaseCount} ${willRebaseCount === 1 ? "commit" : "commits"}`;
-  const mergedSuffix =
-    alreadyMergedCount > 0
-      ? ` ${alreadyMergedCount} ${alreadyMergedCount === 1 ? "commit has" : "commits have"} already been merged to ${q(target)}.`
-      : "";
-  console.log(`Rebasing ${q(currentBranch)} onto ${q(target)}.${mergedSuffix} Will rebase ${willRebaseStr}.`);
+  const n = alreadyMergedCount;
+  console.log(
+    [
+      `Rebasing ${q(currentBranch)} onto ${q(target)}.`,
+      ...(n > 0 ? [` ${plc(n, "commit")} ${pl(n, "has")} already been merged to ${q(target)}.`] : []),
+      `Will rebase ${plc(willRebaseCount, "commit")}.`,
+    ].join(" "),
+  );
 
   // When every merged commit forms a contiguous prefix (or there are none at
   // all) we can use a plain `git rebase --onto target upstream`. Otherwise we
@@ -94,11 +95,11 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
 
   if (allMergedAtStart) {
     const rebaseUpstream = oldestFirst[firstKeptIdx - 1]?.sha ?? baseSha;
-    await runRebase(cwd, target, rebaseUpstream, willRebaseStr, [], []);
+    await runRebase(cwd, target, rebaseUpstream, willRebaseCount, [], []);
   } else {
     const dropShas = oldestFirst.filter((_, i) => !keepFlags[i]).map((c) => c.sha);
     const allShas = oldestFirst.map((c) => c.sha);
-    await runRebase(cwd, target, baseSha, willRebaseStr, allShas, dropShas);
+    await runRebase(cwd, target, baseSha, willRebaseCount, allShas, dropShas);
   }
 }
 
@@ -106,14 +107,14 @@ async function runRebase(
   cwd: string,
   target: string,
   upstream: string,
-  willRebaseStr: string,
+  willRebaseCount: number,
   allShas: string[],
   dropShas: string[],
 ): Promise<void> {
   let todoDir: string | null = null;
   let rebaseOutput = "";
   try {
-    await withProgress(`Rebasing ${willRebaseStr} onto ${q(target)}...`, async () => {
+    await withProgress(`Rebasing ${plc(willRebaseCount, "commit")} onto ${q(target)}...`, async () => {
       let cmd = Bun.$`git rebase --onto ${target} ${upstream}`.cwd(cwd);
       if (dropShas.length > 0) {
         const todo = await writeRebaseTodo(allShas, dropShas);

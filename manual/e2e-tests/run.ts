@@ -21,10 +21,7 @@ import { allScenarios } from "./scenarios";
 
 const { values } = parseArgs({
   args: process.argv.slice(2),
-  options: {
-    only: { type: "string" },
-    interactive: { type: "boolean" },
-  },
+  options: { only: { type: "string" }, interactive: { type: "boolean" } },
   strict: true,
 });
 

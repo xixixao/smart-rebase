@@ -47,7 +47,9 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
   // commits as "already on target" so we can match them on the current branch
   // and skip them. Match by (author date, title) so a rebased target branch
   // (with new SHAs) still matches the current branch's pre-rebase ancestors.
-  for (const c of targetCommits) matcherAdd(mergedMatcher, c.sha, c.authoredDate, c.title);
+  for (const c of targetCommits) {
+    matcherAdd(mergedMatcher, c.sha, c.authoredDate, c.title);
+  }
 
   if (currentBranchCommits.length === 0) {
     throw new Error(`No commits on branch ${q(currentBranch)} ahead of ${q(target)}.`);
@@ -59,7 +61,7 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
   // currentBranchCommits is newest-first (git log default). Walk oldest-first
   // so we can reason about "first non-merged commit" naturally.
   const oldestFirst = [...currentBranchCommits].reverse();
-  const keepFlags = oldestFirst.map((c) => !matcherHas(mergedMatcher, c));
+  const keepFlags = oldestFirst.map((commit) => !matcherHas(mergedMatcher, commit));
   const willRebaseCount = keepFlags.filter(Boolean).length;
   const alreadyMergedCount = oldestFirst.length - willRebaseCount;
 
@@ -190,13 +192,26 @@ function newMatcher(): CommitMatcher {
 
 // Match by `${authoredDate} ${title}` so a rebased copy of a commit (new SHA,
 // same author identity and message) is recognised as the "same" commit.
+// Dates are normalised to UTC ISO before comparison because GitLab and local
+// git emit different but equivalent representations of the same instant
+// (e.g. `2026-05-27T22:11:02+02:00` vs `2026-05-27T20:11:02.000Z`).
+function normalizeDate(authoredDate: string | undefined): string | undefined {
+  if (!authoredDate) return undefined;
+  const ms = Date.parse(authoredDate);
+  if (Number.isNaN(ms)) return undefined;
+  return new Date(ms).toISOString();
+}
+
 function matcherAdd(m: CommitMatcher, sha: string, authoredDate: string | undefined, title: string): void {
   m.shas.add(sha);
-  if (authoredDate) m.dateTitles.add(`${authoredDate} ${title}`);
+  const normalized = normalizeDate(authoredDate);
+  if (normalized) m.dateTitles.add(`${normalized} ${title}`);
 }
 
 function matcherHas(m: CommitMatcher, c: CommitInfo): boolean {
-  return m.shas.has(c.sha) || m.dateTitles.has(`${c.authoredDate} ${c.title}`);
+  if (m.shas.has(c.sha)) return true;
+  const normalized = normalizeDate(c.authoredDate);
+  return normalized !== undefined && m.dateTitles.has(`${normalized} ${c.title}`);
 }
 
 async function getMergedCommitMatcher(
@@ -239,13 +254,14 @@ async function fetchMergedMRsForMatching(
   // commits are in main, which is an ancestor of the target.
   const matchingMRs = allMrs.filter(({ mr }) => mr.merged_at !== null && new Date(mr.merged_at) >= new Date(baseDate));
   if (verbose) {
+    console.log(`Considering ${matchingMRs.length} MRs for rebasing:`);
     // Verbose listing only shows MRs that landed directly on the target branch,
     // so output stays focused on what the user explicitly asked to rebase onto.
     for (const { mr, commits } of matchingMRs) {
       if (mr.target_branch !== target) continue;
-      console.log(`!${mr.iid} ${mr.title}`);
+      console.log(`  !${mr.iid} ${mr.title}`);
       for (const commit of commits) {
-        console.log(`  ${commit.short_id} ${commit.title}`);
+        console.log(`    ${commit.short_id} ${commit.title}`);
       }
     }
   }

@@ -35,12 +35,16 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
 
   const baseSha = await getBaseSha(cwd, target);
 
-  const [currentBranch, currentBranchCommits, mergedMatcher, targetCommits] = await Promise.all([
-    getCurrentBranch(cwd),
-    getCurrentBranchCommits(cwd, baseSha),
-    getMergedCommitMatcher(cwd, baseSha, projectId, target, auth, verbose),
-    getCommitsBetween(cwd, baseSha, target),
-  ]);
+  const [currentBranch, currentBranchCommits, mergedMatcher, targetCommits] = await withProgress(
+    `Figuring out which commits to rebase...`,
+    async () =>
+      await Promise.all([
+        getCurrentBranch(cwd),
+        getCurrentBranchCommits(cwd, baseSha),
+        getMergedCommitMatcher(cwd, baseSha, projectId, target, auth, verbose),
+        getCommitsBetween(cwd, baseSha, target),
+      ]),
+  );
 
   // Stacked-branch case: when the target branch has its own commits ahead of the
   // merge-base (e.g. a parent feature branch in a stacked-MR setup), treat those
@@ -295,7 +299,9 @@ async function checkAndStashDirtyChanges(cwd: string, stdin?: NodeJS.ReadableStr
 async function checkAndUpdateTargetBranch(cwd: string, target: string, stdin?: NodeJS.ReadableStream): Promise<void> {
   let upstream: string;
   try {
-    upstream = (await Bun.$`git rev-parse --abbrev-ref ${target}@{u}`.cwd(cwd).quiet().text()).trim();
+    upstream = await withProgress("Finding upstream...", async () =>
+      (await Bun.$`git rev-parse --abbrev-ref ${target}@{u}`.cwd(cwd).quiet().text()).trim(),
+    );
   } catch {
     throw new Error(
       `Branch ${q(target)} isn't tracking an upstream branch. ` +
@@ -309,11 +315,15 @@ async function checkAndUpdateTargetBranch(cwd: string, target: string, stdin?: N
   }
   const { remoteName, remoteBranch } = upstreamMatch.groups;
 
-  // Fetch to get the real current state of the remote branch.
-  await Bun.$`git fetch ${remoteName} ${remoteBranch}`.cwd(cwd).quiet();
+  const isTargetBranchBehindRemote = await withProgress(`Checking ${q(target)}'s upstream...`, async () => {
+    // Fetch to get the real current state of the remote branch.
+    await Bun.$`git fetch ${remoteName} ${remoteBranch}`.cwd(cwd).quiet();
+    return (await Bun.$`git rev-list ${target}..${upstream}`.cwd(cwd).quiet().text()).trim().length > 0;
+  });
 
-  const behind = (await Bun.$`git rev-list ${target}..${upstream}`.cwd(cwd).quiet().text()).trim();
-  if (!behind) return;
+  if (!isTargetBranchBehindRemote) {
+    return;
+  }
 
   const choice = await selectPrompt(
     `Branch ${q(target)} is not up-to-date.`,

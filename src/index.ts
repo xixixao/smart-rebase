@@ -253,7 +253,7 @@ async function fetchMergedMRsForMatching(
   // (target != main), MRs that were merged to main are still relevant — their
   // commits are in main, which is an ancestor of the target.
   const matchingMRs = allMrs.filter(({ mr }) => mr.merged_at !== null && new Date(mr.merged_at) >= new Date(baseDate));
-  if (verbose) {
+  if (verbose && matchingMRs.length > 0) {
     console.log(`Considering ${matchingMRs.length} MRs for rebasing:`);
     // Verbose listing only shows MRs that landed directly on the target branch,
     // so output stays focused on what the user explicitly asked to rebase onto.

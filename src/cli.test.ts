@@ -264,7 +264,10 @@ async function makeBrowserScript(): Promise<{ browserScript: string; browserLog:
   return { browserScript, browserLog };
 }
 
-async function makeGitRepo(remotes: Record<string, string> = {}): Promise<string> {
+async function makeGitRepo(
+  remotes: Record<string, string> = {},
+  options: { tracking?: boolean } = {},
+): Promise<string> {
   const repoPath = mkdtempSync("/tmp/gitlab-rebase-test-");
   await Bun.$`git init -b main`.cwd(repoPath).quiet();
   await Bun.$`git config user.email "test@example.com"`.cwd(repoPath).quiet();
@@ -277,10 +280,26 @@ async function makeGitRepo(remotes: Record<string, string> = {}): Promise<string
     .cwd(repoPath)
     .env({ ...process.env, GIT_AUTHOR_DATE: D, GIT_COMMITTER_DATE: D })
     .quiet();
+  if (options.tracking !== false) {
+    await addMainTrackingRemote(repoPath, []);
+  }
   for (const [name, url] of Object.entries(remotes)) {
     await Bun.$`git remote add ${name} ${url}`.cwd(repoPath).quiet();
   }
   return repoPath;
+}
+
+async function addMainTrackingRemote(repoPath: string, extraBranches: string[]): Promise<void> {
+  const existing = (await Bun.$`git remote`.cwd(repoPath).quiet().text()).trim().split("\n").filter(Boolean);
+  if (!existing.includes("origin")) {
+    const bareOrigin = mkdtempSync("/tmp/gitlab-rebase-test-origin-");
+    await Bun.$`git init --bare -b main`.cwd(bareOrigin).quiet();
+    await Bun.$`git remote add origin ${bareOrigin}`.cwd(repoPath).quiet();
+    await Bun.$`git push -u origin main`.cwd(repoPath).quiet();
+  }
+  for (const branch of extraBranches) {
+    await Bun.$`git push origin ${branch}`.cwd(repoPath).quiet();
+  }
 }
 
 // --- flag tests ---
@@ -435,7 +454,7 @@ test("exits with error when project cannot be determined", async () => {
 
 test("detects project from origin remote", async () => {
   const { repoPath } = await makeRepoWithDivergedBranch();
-  await Bun.$`git remote add origin git@gitlab.com:mygroup/myproject.git`.cwd(repoPath).quiet();
+  await Bun.$`git remote set-url origin git@gitlab.com:mygroup/myproject.git`.cwd(repoPath).quiet();
 
   const { exitCode } = await run([], { cwd: repoPath, env: { GITLAB_PROJECT: undefined } });
   expect(exitCode).toBe(0);
@@ -444,6 +463,7 @@ test("detects project from origin remote", async () => {
 
 test("detects project from the sole remote when it is not named origin", async () => {
   const { repoPath } = await makeRepoWithDivergedBranch();
+  await Bun.$`git remote remove origin`.cwd(repoPath).quiet();
   await Bun.$`git remote add upstream git@gitlab.com:org/upstream-project.git`.cwd(repoPath).quiet();
 
   const { exitCode } = await run([], { cwd: repoPath, env: { GITLAB_PROJECT: undefined } });

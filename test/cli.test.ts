@@ -2,8 +2,8 @@ import { test, expect, afterAll, beforeAll, beforeEach, jest } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
-import { main } from "./index";
-import { GITLAB_TOKEN_URL } from "./auth";
+import { main } from "../src/index";
+import { GITLAB_TOKEN_URL } from "../src/auth";
 
 const testDataDir = mkdtempSync("/tmp/smart-rebase-test-data-");
 const testCredsFile = join(testDataDir, "credentials.json");
@@ -178,7 +178,7 @@ async function run(
     inkStdin?: string;
     cwd?: string;
     platform?: NodeJS.Platform;
-    stdoutIsTTY?: boolean;
+    stdIsTTY?: boolean;
   } = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const spyOnGetter = jest.spyOn as (
@@ -224,8 +224,8 @@ async function run(
     stderrBuffer += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
     return true;
   };
-  (process.stderr as NodeJS.WriteStream & { isTTY: unknown }).isTTY = false;
-  (process.stdout as NodeJS.WriteStream & { isTTY: unknown }).isTTY = opts.stdoutIsTTY ?? false;
+  (process.stderr as NodeJS.WriteStream & { isTTY: unknown }).isTTY = opts.stdIsTTY ?? false;
+  (process.stdout as NodeJS.WriteStream & { isTTY: unknown }).isTTY = opts.stdIsTTY ?? false;
 
   let exitCode = 0;
   try {
@@ -307,7 +307,7 @@ test("verbose defaults to false", async () => {
 });
 
 test("uses colors instead of backticks when stdout is a TTY", async () => {
-  const { stdout, exitCode } = await run([], { stdoutIsTTY: true });
+  const { stdout, exitCode } = await run([], { stdIsTTY: true });
   expect(exitCode).toBe(0);
   // ANSI codes are stripped here; names appear without backtick delimiters
   expect(stdout.trim()).toBe("Rebasing onto branch main.\nRebasing feature onto main. Will rebase 1 commit.");

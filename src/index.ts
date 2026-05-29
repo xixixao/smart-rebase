@@ -57,7 +57,8 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
   }
 
   if (currentBranchCommits.length === 0) {
-    throw new Error(`No commits on branch ${q(currentBranch)} ahead of ${q(target)}.`);
+    stdout(`No commits on branch ${q(currentBranch)} ahead of ${q(target)}.`);
+    return;
   }
 
   // Re-check current branch; stash/update steps could in principle change it.
@@ -72,9 +73,12 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
 
   if (willRebaseCount === 0) {
     const n = alreadyMergedCount;
-    throw new Error(
+    stdout(
       `The ${plc(n, "commit")} on branch ${q(currentBranch)} ${pl(n, "has")} already been merged to ${q(target)}.`,
     );
+    stdout(`Switching to branch ${q(target)}.`);
+    await Bun.$`git checkout ${target}`.cwd(cwd).quiet();
+    return;
   }
 
   const n = alreadyMergedCount;

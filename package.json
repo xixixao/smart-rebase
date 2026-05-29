@@ -1,5 +1,5 @@
 {
-  "name": "gitlab-rebase",
+  "name": "smart-rebase",
   "module": "src/index.ts",
   "devDependencies": {
     "@types/bun": "latest",
@@ -15,7 +15,7 @@
     "typescript": "^7"
   },
   "bin": {
-    "gitlab-rebase": "./src/manual/entry.ts"
+    "smart-rebase": "./src/manual/entry.ts"
   },
   "private": true,
   "scripts": {

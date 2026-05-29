@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { main } from "./index";
 import { GITLAB_TOKEN_URL } from "./auth";
 
-const testDataDir = mkdtempSync("/tmp/gitlab-rebase-test-data-");
+const testDataDir = mkdtempSync("/tmp/smart-rebase-test-data-");
 const testCredsFile = join(testDataDir, "credentials.json");
 
 // Dates relative to the fixed initial commit date ("2020-01-01") used in makeGitRepo.
@@ -193,7 +193,7 @@ async function run(
     GITLAB_TOKEN: "testtoken",
     GITLAB_URL,
     GITLAB_PROJECT: "testgroup/testrepo",
-    GITLAB_DATA_DIR: mkdtempSync("/tmp/gitlab-rebase-test-data-"),
+    GITLAB_DATA_DIR: mkdtempSync("/tmp/smart-rebase-test-data-"),
     ...opts.env,
   };
 
@@ -256,7 +256,7 @@ async function run(
 }
 
 async function makeBrowserScript(): Promise<{ browserScript: string; browserLog: string }> {
-  const tmpDir = mkdtempSync("/tmp/gitlab-rebase-test-");
+  const tmpDir = mkdtempSync("/tmp/smart-rebase-test-");
   const browserScript = join(tmpDir, "browser.sh");
   const browserLog = join(tmpDir, "browser-url.txt");
   await Bun.write(browserScript, `#!/bin/sh\necho "$1" > "${browserLog}"\n`);
@@ -268,7 +268,7 @@ async function makeGitRepo(
   remotes: Record<string, string> = {},
   options: { tracking?: boolean } = {},
 ): Promise<string> {
-  const repoPath = mkdtempSync("/tmp/gitlab-rebase-test-");
+  const repoPath = mkdtempSync("/tmp/smart-rebase-test-");
   await Bun.$`git init -b main`.cwd(repoPath).quiet();
   await Bun.$`git config user.email "test@example.com"`.cwd(repoPath).quiet();
   await Bun.$`git config user.name "Test User"`.cwd(repoPath).quiet();
@@ -292,7 +292,7 @@ async function makeGitRepo(
 async function addMainTrackingRemote(repoPath: string, extraBranches: string[]): Promise<void> {
   const existing = (await Bun.$`git remote`.cwd(repoPath).quiet().text()).trim().split("\n").filter(Boolean);
   if (!existing.includes("origin")) {
-    const bareOrigin = mkdtempSync("/tmp/gitlab-rebase-test-origin-");
+    const bareOrigin = mkdtempSync("/tmp/smart-rebase-test-origin-");
     await Bun.$`git init --bare -b main`.cwd(bareOrigin).quiet();
     await Bun.$`git remote add origin ${bareOrigin}`.cwd(repoPath).quiet();
     await Bun.$`git push -u origin main`.cwd(repoPath).quiet();
@@ -513,36 +513,36 @@ test("loads credentials from settings file when env vars are not set", async () 
 });
 
 test("saves credentials to macOS Library path when on darwin", async () => {
-  const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
+  const tmpHome = mkdtempSync("/tmp/smart-rebase-test-home-");
   const { exitCode } = await run([], {
     platform: "darwin",
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome, GITLAB_DATA_DIR: undefined },
     inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
-  expect(existsSync(join(tmpHome, "Library", "Application Support", "gitlab-rebase", "credentials.json"))).toBe(true);
+  expect(existsSync(join(tmpHome, "Library", "Application Support", "smart-rebase", "credentials.json"))).toBe(true);
 });
 
 test("saves credentials to APPDATA path when on win32", async () => {
-  const tmpAppData = mkdtempSync("/tmp/gitlab-rebase-test-appdata-");
+  const tmpAppData = mkdtempSync("/tmp/smart-rebase-test-appdata-");
   const { exitCode } = await run([], {
     platform: "win32",
     env: { GITLAB_TOKEN: undefined, APPDATA: tmpAppData, GITLAB_DATA_DIR: undefined },
     inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
-  expect(existsSync(join(tmpAppData, "gitlab-rebase", "credentials.json"))).toBe(true);
+  expect(existsSync(join(tmpAppData, "smart-rebase", "credentials.json"))).toBe(true);
 });
 
 test("saves credentials to XDG_CONFIG_HOME path when on linux", async () => {
-  const tmpXdg = mkdtempSync("/tmp/gitlab-rebase-test-xdg-");
+  const tmpXdg = mkdtempSync("/tmp/smart-rebase-test-xdg-");
   const { exitCode } = await run([], {
     platform: "linux",
     env: { GITLAB_TOKEN: undefined, XDG_CONFIG_HOME: tmpXdg, GITLAB_DATA_DIR: undefined },
     inkStdin: "mytoken\r",
   });
   expect(exitCode).toBe(0);
-  expect(existsSync(join(tmpXdg, "gitlab-rebase", "credentials.json"))).toBe(true);
+  expect(existsSync(join(tmpXdg, "smart-rebase", "credentials.json"))).toBe(true);
 });
 
 test("env var takes precedence over saved credentials", async () => {
@@ -558,7 +558,7 @@ test("env var takes precedence over saved credentials", async () => {
 // --- .netrc tests ---
 
 test("reads token from .netrc matching the GITLAB_URL hostname", async () => {
-  const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
+  const tmpHome = mkdtempSync("/tmp/smart-rebase-test-home-");
   await Bun.write(join(tmpHome, ".netrc"), "machine localhost\nlogin user@example.com\npassword netrctoken\n");
   const { stderr, exitCode } = await run([], { env: { GITLAB_TOKEN: undefined, HOME: tmpHome } });
   expect(exitCode).toBe(0);
@@ -566,7 +566,7 @@ test("reads token from .netrc matching the GITLAB_URL hostname", async () => {
 });
 
 test("env var takes precedence over .netrc token", async () => {
-  const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
+  const tmpHome = mkdtempSync("/tmp/smart-rebase-test-home-");
   await Bun.write(join(tmpHome, ".netrc"), "machine localhost\npassword netrctoken\n");
   const { stderr, exitCode } = await run([], { env: { GITLAB_TOKEN: "envtoken", HOME: tmpHome } });
   expect(exitCode).toBe(0);
@@ -577,7 +577,7 @@ test("env var takes precedence over .netrc token", async () => {
 test(".netrc takes precedence over saved credentials", async () => {
   mkdirSync(testDataDir, { recursive: true });
   await Bun.write(testCredsFile, JSON.stringify({ token: "savedtoken" }));
-  const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
+  const tmpHome = mkdtempSync("/tmp/smart-rebase-test-home-");
   await Bun.write(join(tmpHome, ".netrc"), "machine localhost\npassword netrctoken\n");
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome, GITLAB_DATA_DIR: testDataDir },
@@ -588,7 +588,7 @@ test(".netrc takes precedence over saved credentials", async () => {
 });
 
 test("prompts when .netrc does not contain a matching machine entry", async () => {
-  const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
+  const tmpHome = mkdtempSync("/tmp/smart-rebase-test-home-");
   await Bun.write(join(tmpHome, ".netrc"), "machine other.example.com\npassword othertoken\n");
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome },
@@ -599,7 +599,7 @@ test("prompts when .netrc does not contain a matching machine entry", async () =
 });
 
 test("prompts when .netrc machine entry has no password field", async () => {
-  const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
+  const tmpHome = mkdtempSync("/tmp/smart-rebase-test-home-");
   await Bun.write(join(tmpHome, ".netrc"), "machine localhost\nlogin user@example.com\n");
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome },
@@ -610,7 +610,7 @@ test("prompts when .netrc machine entry has no password field", async () => {
 });
 
 test("proceeds normally when .netrc file does not exist", async () => {
-  const tmpHome = mkdtempSync("/tmp/gitlab-rebase-test-home-");
+  const tmpHome = mkdtempSync("/tmp/smart-rebase-test-home-");
   const { stderr, exitCode } = await run([], {
     env: { GITLAB_TOKEN: undefined, HOME: tmpHome },
     inkStdin: "mytoken\r",
@@ -623,7 +623,7 @@ test("proceeds normally when .netrc file does not exist", async () => {
 
 test("merges cached older MRs with fresh ones", async () => {
   const { repoPath, mergedShas, headSha } = await makeRepoWithMergedAndNewFeature(2);
-  const tmpDir = mkdtempSync("/tmp/gitlab-rebase-cache-test-");
+  const tmpDir = mkdtempSync("/tmp/smart-rebase-cache-test-");
 
   mockMRs = [{ iid: 1, title: "Old MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "old commit" }]);
@@ -643,7 +643,7 @@ test("merges cached older MRs with fresh ones", async () => {
 
 test("fresh data replaces cached version of same MR", async () => {
   const { repoPath, mergedShas, headSha } = await makeRepoWithMergedAndNewFeature(1);
-  const tmpDir = mkdtempSync("/tmp/gitlab-rebase-cache-test-");
+  const tmpDir = mkdtempSync("/tmp/smart-rebase-cache-test-");
 
   mockMRs = [{ iid: 1, title: "Old title", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "the commit" }]);
@@ -700,10 +700,10 @@ test("exits with error when commits API returns an error", async () => {
 });
 
 test("exits with error when cwd is not a git repository", async () => {
-  const nonGitDir = mkdtempSync("/tmp/gitlab-rebase-not-git-");
+  const nonGitDir = mkdtempSync("/tmp/smart-rebase-not-git-");
   const { stderr, exitCode } = await run([], { cwd: nonGitDir });
   expect(exitCode).not.toBe(0);
-  expect(stderr.trim()).toBe("Not a Git repository. `gitlab-rebase` must be used inside a Git repo.");
+  expect(stderr.trim()).toBe("Not a Git repository. `smart-rebase` must be used inside a Git repo.");
 });
 
 test("exits with error when remote exists but has no URL configured", async () => {
@@ -717,13 +717,13 @@ test("exits with error when remote exists but has no URL configured", async () =
 });
 
 test("uses default data directory when GITLAB_DATA_DIR is not set", async () => {
-  const homeDir = mkdtempSync("/tmp/gitlab-rebase-home-");
+  const homeDir = mkdtempSync("/tmp/smart-rebase-home-");
   const { exitCode } = await run([], {
     env: { GITLAB_DATA_DIR: undefined, HOME: homeDir, XDG_CONFIG_HOME: undefined },
   });
   expect(exitCode).toBe(0);
-  // Platform defaults to "linux" in tests, so falls back to ~/.config/gitlab-rebase
-  expect(existsSync(join(homeDir, ".config", "gitlab-rebase"))).toBe(true);
+  // Platform defaults to "linux" in tests, so falls back to ~/.config/smart-rebase
+  expect(existsSync(join(homeDir, ".config", "smart-rebase"))).toBe(true);
 });
 
 test("exits normally when GITLAB_TOKEN is set without needing stdin input", async () => {
@@ -733,8 +733,8 @@ test("exits normally when GITLAB_TOKEN is set without needing stdin input", asyn
 
 test("fails with helpful message when credentials cannot be saved", async () => {
   // Place a regular file at the path that would be used as the data directory so mkdir fails
-  const blockingBase = mkdtempSync("/tmp/gitlab-rebase-block-");
-  const blockingDataDir = join(blockingBase, "gitlab-rebase");
+  const blockingBase = mkdtempSync("/tmp/smart-rebase-block-");
+  const blockingDataDir = join(blockingBase, "smart-rebase");
   writeFileSync(blockingDataDir, "blocker");
 
   const { stderr, exitCode } = await run([], {
@@ -748,7 +748,7 @@ test("fails with helpful message when credentials cannot be saved", async () => 
 });
 
 test("handles corrupted cache file gracefully", async () => {
-  const dataDir = mkdtempSync("/tmp/gitlab-rebase-cache-corrupt-");
+  const dataDir = mkdtempSync("/tmp/smart-rebase-cache-corrupt-");
   const key = `${GITLAB_URL}:testgroup/testrepo`.replace(/[^a-zA-Z0-9.-]/g, "_");
   writeFileSync(join(dataDir, `${key}.json`), "corrupted{{{{");
 
@@ -758,8 +758,8 @@ test("handles corrupted cache file gracefully", async () => {
 
 test("fails with helpful message when cache cannot be written", async () => {
   // Place a regular file at the path that would be used as the data directory so mkdir fails
-  const blockingBase = mkdtempSync("/tmp/gitlab-rebase-block-");
-  const blockingDataDir = join(blockingBase, "gitlab-rebase");
+  const blockingBase = mkdtempSync("/tmp/smart-rebase-block-");
+  const blockingDataDir = join(blockingBase, "smart-rebase");
   writeFileSync(blockingDataDir, "blocker");
 
   const { stderr, exitCode } = await run([], { env: { GITLAB_DATA_DIR: blockingDataDir } });
@@ -933,7 +933,7 @@ test("second run stops MR pagination at newest cached updated_at when merge base
   const U2023 = "2023-01-01T00:00:00+00:00";
   const U2022 = "2022-01-01T00:00:00+00:00";
   const U2021 = "2021-01-01T00:00:00+00:00";
-  const tmpDir = mkdtempSync("/tmp/gitlab-rebase-cache-since-");
+  const tmpDir = mkdtempSync("/tmp/smart-rebase-cache-since-");
   mockMRs = [
     { iid: 5, title: "MR5", target_branch: "main", merged_at: RECENT, updated_at: U2024 },
     { iid: 4, title: "MR4", target_branch: "main", merged_at: RECENT, updated_at: U2023 },
@@ -966,7 +966,7 @@ test("refetches from baseDate when merge base moves backwards between runs", asy
   await Bun.$`git checkout -b feature`.cwd(repoPath).quiet();
   await Bun.$`git commit --allow-empty -m "feature work"`.cwd(repoPath).quiet();
 
-  const tmpDir = mkdtempSync("/tmp/gitlab-rebase-backwards-");
+  const tmpDir = mkdtempSync("/tmp/smart-rebase-backwards-");
   mockMRs = [{ iid: 1, title: "MR1", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, []);
 
@@ -1028,7 +1028,7 @@ const REBASE_UPTODATE = "Current branch feature is up to date.\n";
 
 async function makeRepoWithRemoteAhead(): Promise<{ repoPath: string; remoteNewSha: string }> {
   const remotePath = await makeGitRepo();
-  const localPath = mkdtempSync("/tmp/gitlab-rebase-test-");
+  const localPath = mkdtempSync("/tmp/smart-rebase-test-");
   await Bun.$`git clone ${remotePath} ${localPath}`.quiet();
   await Bun.$`git config user.email "test@example.com"`.cwd(localPath).quiet();
   await Bun.$`git config user.name "Test User"`.cwd(localPath).quiet();
@@ -1052,7 +1052,7 @@ test("exits with error when target branch has no upstream tracking", async () =>
 
 test("shows no update prompt when target is already up to date with remote", async () => {
   const remotePath = await makeGitRepo();
-  const localPath = mkdtempSync("/tmp/gitlab-rebase-test-");
+  const localPath = mkdtempSync("/tmp/smart-rebase-test-");
   await Bun.$`git clone ${remotePath} ${localPath}`.quiet();
   await Bun.$`git config user.email "test@example.com"`.cwd(localPath).quiet();
   await Bun.$`git config user.name "Test User"`.cwd(localPath).quiet();
@@ -1087,7 +1087,7 @@ test("updates target branch when user selects Update", async () => {
 
 test("updates checked-out target branch so index and worktree match remote", async () => {
   const remotePath = await makeGitRepo();
-  const localPath = mkdtempSync("/tmp/gitlab-rebase-test-");
+  const localPath = mkdtempSync("/tmp/smart-rebase-test-");
   await Bun.$`git clone ${remotePath} ${localPath}`.quiet();
   await Bun.$`git config user.email "test@example.com"`.cwd(localPath).quiet();
   await Bun.$`git config user.name "Test User"`.cwd(localPath).quiet();
@@ -1330,7 +1330,7 @@ test("scenario 1: matches MR commits by author-date and title when SHAs differ",
 test("scenario 2: matches commits against a local target branch (stacked rebase)", async () => {
   // No GitLab merged MR is involved here — the user already locally rebased A
   // onto a newer main, so A's commits have new SHAs. B (still based on old A)
-  // is rebased with `gitlab-rebase a`. Without target-branch matching this
+  // is rebased with `smart-rebase a`. Without target-branch matching this
   // would re-apply A's commits and produce duplicates or conflicts.
   const repoPath = await makeGitRepo();
 
@@ -1428,7 +1428,7 @@ test("scenario 4: drops squash-merged middle commits matched by author-date+titl
   // rebased feature-b onto main (so B has *new* SHAs but the same author
   // dates/titles), pushed, and merged. GitLab's MR commit list for B now
   // contains those rebased SHAs — none of which exist on feature-c.
-  // gitlab-rebase on feature-c must therefore match B by (author date, title)
+  // smart-rebase on feature-c must therefore match B by (author date, title)
   // and drop B's commits from the *middle* of the branch.
   const repoPath = await makeGitRepo();
   await Bun.$`git checkout -b feature-c`.cwd(repoPath).quiet();

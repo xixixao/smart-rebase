@@ -7,7 +7,7 @@ import { q } from "./format";
 import { getDataDir } from "./paths";
 
 export const GITLAB_TOKEN_URL =
-  "https://gitlab.com/-/user_settings/personal_access_tokens?name=gitlab-rebase&scopes=api";
+  "https://gitlab.com/-/user_settings/personal_access_tokens?name=smart-rebase&scopes=api";
 
 export interface GitLabAuth {
   token: string;

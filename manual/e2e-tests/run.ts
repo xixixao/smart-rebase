@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * End-to-end test runner for gitlab-rebase.
+ * End-to-end test runner for smart-rebase.
  *
  * Runs every scenario from ./scenarios.ts in sequence. Each scenario gets its
  * own temporary GitLab project (created via `glab`) and is torn down at the
@@ -12,7 +12,7 @@
  *
  * Prerequisites:
  *   - glab authenticated (glab auth login)
- *   - GITLAB_TOKEN env var set (for gitlab-rebase itself)
+ *   - GITLAB_TOKEN env var set (for smart-rebase itself)
  */
 
 import { parseArgs } from "util";

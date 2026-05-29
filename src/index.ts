@@ -89,7 +89,7 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
   // all) we can use a plain `git rebase --onto target upstream`. Otherwise we
   // do a single interactive rebase whose todo list has the merged commits'
   // `pick` lines rewritten to `drop` by a sequence editor we control. Either
-  // way, gitlab-rebase invokes git rebase exactly once.
+  // way, smart-rebase invokes git rebase exactly once.
   const firstKeptIdx = keepFlags.findIndex(Boolean);
   const allMergedAtStart = keepFlags.slice(firstKeptIdx).every(Boolean);
 
@@ -155,7 +155,7 @@ async function writeRebaseTodo(allShas: string[], dropShas: string[]): Promise<{
   // git rebase's pick/drop parser only reads the action and the SHA; subjects
   // (the rest of the line) are decorative, so we omit them.
   const lines = allShas.map((sha) => `${dropSet.has(sha) ? "drop" : "pick"} ${sha}`);
-  const dir = mkdtempSync("/tmp/gitlab-rebase-todo-");
+  const dir = mkdtempSync("/tmp/smart-rebase-todo-");
   const path = join(dir, "todo");
   await Bun.write(path, lines.join("\n") + "\n");
   return { dir, path };
@@ -371,7 +371,7 @@ async function ensureGitRepo(cwd: string, verbose: boolean): Promise<void> {
     try {
       return (await Bun.$`git rev-parse --short HEAD`.cwd(cwd).quiet().text()).trim();
     } catch {
-      throw new Error(`Not a Git repository. ${q("gitlab-rebase")} must be used inside a Git repo.`);
+      throw new Error(`Not a Git repository. ${q("smart-rebase")} must be used inside a Git repo.`);
     }
   });
   if (verbose) {

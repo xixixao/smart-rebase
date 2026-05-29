@@ -30,12 +30,12 @@ import {
  * Scenario 0 (baseline): the original happy path from the first e2e test.
  *
  * Two stacked feature branches A and B (B sits on top of A). Squash-merge A,
- * then run gitlab-rebase on B; gitlab-rebase must recognise A's commits as
+ * then run smart-rebase on B; smart-rebase must recognise A's commits as
  * already merged and rebase only B's own commits onto main.
  */
 export const baselineStackedSquash: Scenario = {
   name: "baseline-stacked-squash",
-  description: "A then B; A is squash-merged; gitlab-rebase on B drops A's commits and rebases B onto main.",
+  description: "A then B; A is squash-merged; smart-rebase on B drops A's commits and rebases B onto main.",
   async run(ctx: E2EContext) {
     await step("Create feature-a with 2 commits", async () => {
       await createBranchFrom(ctx, "feature-a", "main");
@@ -67,7 +67,7 @@ export const baselineStackedSquash: Scenario = {
     await step(`Squash-merge MR A (!${mrA})`, () => mergeMR(ctx, mrA, { squash: true }));
     await step("Pull main", () => pullBranch(ctx, "main"));
 
-    await step("Run gitlab-rebase on feature-b", async () => {
+    await step("Run smart-rebase on feature-b", async () => {
       await checkout(ctx, "feature-b");
       await runGitlabRebase(ctx);
       await printHistory(ctx, "HEAD", "feature-b after rebase");
@@ -95,14 +95,14 @@ export const baselineStackedSquash: Scenario = {
  *     get new SHAs but the same author dates and titles.
  *   - Merge A. Now A's MR commits in GitLab have brand-new SHAs.
  *   - Locally, B still has the original (pre-rebase) A commits in its history.
- *   - Run gitlab-rebase on B. It must match the old A-commits on B against
+ *   - Run smart-rebase on B. It must match the old A-commits on B against
  *     A's new commits via (author date, title) and skip them.
  */
 export const sha1RewrittenByGitlabRebase: Scenario = {
-  name: "scenario-1-gitlab-rebase-rewrites-shas",
+  name: "scenario-1-smart-rebase-rewrites-shas",
   description:
     "C lands on main; user clicks 'rebase A onto main' on GitLab (rewriting A's SHAs); A merges. " +
-    "gitlab-rebase on B must match A's old commits by (author date, title), not SHA.",
+    "smart-rebase on B must match A's old commits by (author date, title), not SHA.",
   async run(ctx: E2EContext) {
     await step("Create feature-a with 2 commits", async () => {
       await createBranchFrom(ctx, "feature-a", "main");
@@ -135,10 +135,10 @@ export const sha1RewrittenByGitlabRebase: Scenario = {
     await step("Press 'rebase onto main' on MR A — rewrites A's SHAs", () => gitlabRebaseMR(ctx, mrA));
     await step(`Merge MR A (!${mrA})`, () => mergeMR(ctx, mrA, { squash: false }));
 
-    await step("Run gitlab-rebase on feature-b (still has pre-rebase A commits)", async () => {
+    await step("Run smart-rebase on feature-b (still has pre-rebase A commits)", async () => {
       await checkout(ctx, "feature-b");
       // Local feature-b still has the OLD A commit SHAs as ancestors. After
-      // pulling main and rebasing, gitlab-rebase should detect the old A
+      // pulling main and rebasing, smart-rebase should detect the old A
       // commits as "already merged" via author-date+title matching.
       await runGitlabRebase(ctx);
       await printHistory(ctx, "HEAD", "feature-b after rebase");
@@ -161,16 +161,16 @@ export const sha1RewrittenByGitlabRebase: Scenario = {
  *
  * Order of events:
  *   - C is merged to main (any unrelated MR).
- *   - User runs `gitlab-rebase` on A locally → A is now on top of new main
+ *   - User runs `smart-rebase` on A locally → A is now on top of new main
  *     with rewritten SHAs but identical author dates/titles.
- *   - User switches to B and runs `gitlab-rebase feature-a`. A is *not*
+ *   - User switches to B and runs `smart-rebase feature-a`. A is *not*
  *     merged, so this is purely a Git problem: B's old A-ancestors must be
  *     matched against feature-a (the local target) by (author date, title).
  */
 export const localRebaseTargetMatching: Scenario = {
   name: "scenario-2-local-target-matching",
   description:
-    "C is merged; user locally rebases A; running `gitlab-rebase feature-a` on B must " +
+    "C is merged; user locally rebases A; running `smart-rebase feature-a` on B must " +
     "match B's stale A-ancestors against the freshly rebased feature-a.",
   async run(ctx: E2EContext) {
     await step("Create feature-a (2 commits) and feature-b stacked on it (2 commits)", async () => {
@@ -197,14 +197,14 @@ export const localRebaseTargetMatching: Scenario = {
     const mrC = await createMR(ctx, { sourceBranch: "feature-c", targetBranch: "main", title: "MR C" });
     await step(`Merge MR C (!${mrC})`, () => mergeMR(ctx, mrC, { squash: true }));
 
-    await step("Locally rebase feature-a onto new main with gitlab-rebase", async () => {
+    await step("Locally rebase feature-a onto new main with smart-rebase", async () => {
       await pullBranch(ctx, "main");
       await checkout(ctx, "feature-a");
       await runGitlabRebase(ctx);
       await printHistory(ctx, "HEAD", "feature-a after rebase");
     });
 
-    await step("Switch to feature-b, run `gitlab-rebase feature-a`", async () => {
+    await step("Switch to feature-b, run `smart-rebase feature-a`", async () => {
       await checkout(ctx, "feature-b");
       // feature-b still has the OLD a1/a2 as ancestors. With target-branch
       // matching, those are recognised as "already in feature-a" via
@@ -230,7 +230,7 @@ export const localRebaseTargetMatching: Scenario = {
  *
  * A variant of scenario 2 where C is the local ancestor of A (so A's local
  * history contains C's commits). After C is squash-merged and A is locally
- * rebased, running `gitlab-rebase feature-a` on B must use *both*:
+ * rebased, running `smart-rebase feature-a` on B must use *both*:
  *   - GitLab merged-MR matching to recognise C's old commits in B's history.
  *   - Local target-branch matching to recognise A's old commits in B's history.
  */
@@ -238,7 +238,7 @@ export const combinedGitlabAndLocalMatching: Scenario = {
   name: "scenario-3-combined-matching",
   description:
     "C is a local ancestor of A; squash-merge C; locally rebase A; " +
-    "`gitlab-rebase feature-a` on B must combine GitLab MR matching (for C) and local target matching (for A).",
+    "`smart-rebase feature-a` on B must combine GitLab MR matching (for C) and local target matching (for A).",
   async run(ctx: E2EContext) {
     await step(
       "Create feature-c (1 commit), feature-a stacked (2 commits), feature-b stacked (2 commits)",
@@ -273,7 +273,7 @@ export const combinedGitlabAndLocalMatching: Scenario = {
       await printHistory(ctx, "HEAD", "feature-a after rebase");
     });
 
-    await step("Switch to feature-b, run `gitlab-rebase feature-a`", async () => {
+    await step("Switch to feature-b, run `smart-rebase feature-a`", async () => {
       await checkout(ctx, "feature-b");
       // feature-b still has [c, a1, a2, b1, b2]. We expect:
       //   - c   → matched via GitLab merged MR (squashed C)
@@ -302,7 +302,7 @@ export const combinedGitlabAndLocalMatching: Scenario = {
  *   - feature-c still has the original A1, A2, B1, B2, C1, C2 in its history;
  *   - GitLab's MR for B lists the rebased B SHAs — none of which exist on
  *     feature-c.
- * Running `gitlab-rebase` on feature-c must therefore match B's commits via
+ * Running `smart-rebase` on feature-c must therefore match B's commits via
  * (author date, title), drop them from the middle of the branch, and rebase
  * A1, A2, C1, C2 onto main.
  */
@@ -310,7 +310,7 @@ export const middleOfStackSquashMerge: Scenario = {
   name: "scenario-4-middle-of-stack-squash",
   description:
     "Stack A → B → C; B is locally rebased onto main and then squash-merged. " +
-    "gitlab-rebase on C must drop B's commits from the middle (matched by author-date+title) " +
+    "smart-rebase on C must drop B's commits from the middle (matched by author-date+title) " +
     "and rebase A's and C's commits onto main.",
   async run(ctx: E2EContext) {
     await step("Create feature-a (2 commits)", async () => {
@@ -352,7 +352,7 @@ export const middleOfStackSquashMerge: Scenario = {
 
     await step(`Squash-merge MR B (!${mrB}) into main`, () => mergeMR(ctx, mrB, { squash: true }));
 
-    await step("Run gitlab-rebase on feature-c (drops B's commits from the middle)", async () => {
+    await step("Run smart-rebase on feature-c (drops B's commits from the middle)", async () => {
       await pullBranch(ctx, "main");
       await checkout(ctx, "feature-c");
       await runGitlabRebase(ctx);

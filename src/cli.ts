@@ -3,7 +3,7 @@ import { hideBin } from "yargs/helpers";
 
 export function createCli(argv = hideBin(process.argv)) {
   return yargs(argv)
-    .scriptName("gitlab-rebase")
+    .scriptName("smart-rebase")
     .usage("$0 [target] [options]")
     .command("$0 [target]", false, (yargs) =>
       yargs.positional("target", { type: "string", description: "Target branch to rebase onto" }),

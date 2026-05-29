@@ -1,5 +1,5 @@
 /**
- * Shared helpers for the gitlab-rebase end-to-end tests.
+ * Shared helpers for the smart-rebase end-to-end tests.
  *
  * Each scenario gets its own GitLab project (created via `glab`), runs a
  * sequence of git/glab operations against it, and tears it down at the end.
@@ -95,7 +95,7 @@ export interface E2EContext {
   repoDir: string;
   /** GitLab project path: `namespace/repo`. */
   projectPath: string;
-  /** Path to gitlab-rebase's entry.ts so each scenario invokes the same binary. */
+  /** Path to smart-rebase's entry.ts so each scenario invokes the same binary. */
   entryScript: string;
   workDir: string;
   scenarioName: string;
@@ -113,8 +113,8 @@ interface SetupResult {
  * the project down.
  */
 export async function setupScenario(scenarioName: string): Promise<SetupResult> {
-  const repoName = `gitlab-rebase-e2e-${scenarioName}-${Date.now()}`;
-  const workDir = realpathSync(mkdtempSync(join(tmpdir(), "gitlab-rebase-e2e-")));
+  const repoName = `smart-rebase-e2e-${scenarioName}-${Date.now()}`;
+  const workDir = realpathSync(mkdtempSync(join(tmpdir(), "smart-rebase-e2e-")));
   const repoDir = join(workDir, repoName);
   const entryScript = join(import.meta.dir, "..", "..", "src", "manual", "entry.ts");
 
@@ -161,7 +161,7 @@ export async function setupScenario(scenarioName: string): Promise<SetupResult> 
     projectCreated = true;
     if (created.web_url) console.log(`  url:          ${created.web_url}`);
     // Fast-forward-only merges so squash merges land a single commit on main
-    // with no merge-commit — that's the shape gitlab-rebase is designed for.
+    // with no merge-commit — that's the shape smart-rebase is designed for.
     await glabApi(`projects/${encodeProject(projectPath)}`, ["-X", "PUT", "-f", "merge_method=ff"]);
   });
 
@@ -288,7 +288,7 @@ export async function mergeMR(ctx: E2EContext, iid: number, opts: { squash?: boo
 export async function runGitlabRebase(ctx: E2EContext, args: string[] = []): Promise<void> {
   const result = await $`bun run ${ctx.entryScript} ${args}`.cwd(ctx.repoDir).nothrow();
   if (result.exitCode !== 0) {
-    throw new Error(`gitlab-rebase exited with code ${result.exitCode}`);
+    throw new Error(`smart-rebase exited with code ${result.exitCode}`);
   }
 }
 

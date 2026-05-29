@@ -1,9 +1,9 @@
 import { type } from "arktype";
-import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { q, stderr } from "./format";
 import { openBrowser } from "./manual/openBrowser";
 import { textInputPrompt, withProgress } from "./manual/prompt";
-import { q } from "./format";
 import { getDataDir } from "./paths";
 
 export const GITLAB_TOKEN_URL =
@@ -91,8 +91,8 @@ export async function getAuth(stdin?: NodeJS.ReadableStream): Promise<GitLabAuth
   }
 
   if (!token) {
-    process.stderr.write(`Environment variable ${q("GITLAB_TOKEN")} is not set.\n`);
-    process.stderr.write(`Create a personal access token with ${q("api")} scope at:\n  ${q(GITLAB_TOKEN_URL)}\n\n`);
+    stderr(`Environment variable ${q("GITLAB_TOKEN")} is not set.`);
+    stderr(`Create a personal access token with ${q("api")} scope at:\n  ${q(GITLAB_TOKEN_URL)}\n\n`);
     token = await textInputPrompt(`Press ${q("Enter")} to open in your browser, or paste your token: `, stdin);
     if (token === "") {
       await withProgress("Opening browser...", () => openBrowser(GITLAB_TOKEN_URL));
@@ -100,7 +100,7 @@ export async function getAuth(stdin?: NodeJS.ReadableStream): Promise<GitLabAuth
     }
     const savedToken = token;
     const savedPath = await withProgress("Saving settings...", () => saveSettings({ token: savedToken }));
-    process.stderr.write(`GitLab token saved to ${savedPath}\n`);
+    stderr(`GitLab token saved to ${savedPath}`);
   }
 
   return { token };

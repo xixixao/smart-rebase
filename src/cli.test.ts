@@ -211,17 +211,14 @@ async function run(
 
   let stdoutBuffer = "";
   let stderrBuffer = "";
-  const origLog = console.log;
-  const origError = console.error;
+  const origStdoutWrite = process.stdout.write;
   const origStderrWrite = process.stderr.write;
-  const origStderrIsTTY = process.stderr.isTTY;
   const origStdoutIsTTY = process.stdout.isTTY;
+  const origStderrIsTTY = process.stderr.isTTY;
 
-  console.log = (...args: unknown[]) => {
-    stdoutBuffer += args.map(String).join(" ") + "\n";
-  };
-  console.error = (...args: unknown[]) => {
-    stderrBuffer += args.map(String).join(" ") + "\n";
+  (process.stdout as NodeJS.WriteStream & { write: unknown }).write = (chunk: string | Uint8Array) => {
+    stdoutBuffer += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+    return true;
   };
   (process.stderr as NodeJS.WriteStream & { write: unknown }).write = (chunk: string | Uint8Array) => {
     stderrBuffer += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
@@ -238,8 +235,7 @@ async function run(
     stderrBuffer += (e instanceof Error ? e.message : String(e)) + "\n";
   } finally {
     platformSpy.mockRestore();
-    console.log = origLog;
-    console.error = origError;
+    (process.stdout as NodeJS.WriteStream & { write: unknown }).write = origStdoutWrite;
     (process.stderr as NodeJS.WriteStream & { write: unknown }).write = origStderrWrite;
     (process.stderr as NodeJS.WriteStream & { isTTY: unknown }).isTTY = origStderrIsTTY;
     (process.stdout as NodeJS.WriteStream & { isTTY: unknown }).isTTY = origStdoutIsTTY;

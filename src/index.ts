@@ -3,7 +3,7 @@ import { getAuth, type GitLabAuth } from "./auth";
 import { fetchMergedMRsSince, type MRWithCommits, getGitlabUrl } from "./gitlab";
 import { readCache, writeCache, type MrsProjectCache } from "./storage";
 import { selectPrompt, withProgress } from "./manual/prompt";
-import { pl, plc, q } from "./format";
+import { pl, plc, q, stderr, stdout } from "./format";
 import { typedRegExp } from "ts-regexp";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -78,7 +78,7 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
   }
 
   const n = alreadyMergedCount;
-  console.log(
+  stdout(
     [
       `Rebasing ${q(currentBranch)} onto ${q(target)}.`,
       ...(n > 0 ? [` ${plc(n, "commit")} ${pl(n, "has")} already been merged to ${q(target)}.`] : []),
@@ -148,7 +148,7 @@ async function runRebase(
   } finally {
     if (todoDir) rmSync(todoDir, { recursive: true, force: true });
   }
-  if (rebaseOutput) process.stderr.write(rebaseOutput + "\n");
+  if (rebaseOutput) stderr(rebaseOutput);
 }
 
 async function writeRebaseTodo(allShas: string[], dropShas: string[]): Promise<{ dir: string; path: string }> {
@@ -260,14 +260,14 @@ async function fetchMergedMRsForMatching(
   // commits are in main, which is an ancestor of the target.
   const matchingMRs = allMrs.filter(({ mr }) => mr.merged_at !== null && new Date(mr.merged_at) >= new Date(baseDate));
   if (verbose && matchingMRs.length > 0) {
-    console.log(`Considering ${matchingMRs.length} MRs for rebasing:`);
+    stderr(`Considering ${matchingMRs.length} MRs for rebasing:`);
     // Verbose listing only shows MRs that landed directly on the target branch,
     // so output stays focused on what the user explicitly asked to rebase onto.
     for (const { mr, commits } of matchingMRs) {
       if (mr.target_branch !== target) continue;
-      console.log(`  !${mr.iid} ${mr.title}`);
+      stderr(`  !${mr.iid} ${mr.title}`);
       for (const commit of commits) {
-        console.log(`    ${commit.short_id} ${commit.title}`);
+        stderr(`    ${commit.short_id} ${commit.title}`);
       }
     }
   }
@@ -294,7 +294,7 @@ async function checkAndStashDirtyChanges(cwd: string, stdin?: NodeJS.ReadableStr
       const r = await Bun.$`git stash push`.cwd(cwd).quiet();
       stashOutput = (r.stdout.toString() + r.stderr.toString()).trim();
     });
-    process.stderr.write(stashOutput + "\n");
+    stderr(stashOutput);
   }
 }
 
@@ -351,7 +351,7 @@ async function checkAndUpdateTargetBranch(cwd: string, target: string, stdin?: N
         await Bun.$`git branch -f ${target} ${upstream}`.cwd(cwd).quiet();
       }
     });
-    process.stderr.write(`Branch ${q(target)} updated.\n`);
+    stderr(`Branch ${q(target)} updated.`);
   }
 }
 
@@ -376,7 +376,7 @@ async function ensureGitRepo(cwd: string, verbose: boolean): Promise<void> {
     }
   });
   if (verbose) {
-    console.log(`Current commit: ${q(headShort)}`);
+    stderr(`Current commit: ${q(headShort)}`);
   }
 }
 
@@ -449,7 +449,7 @@ async function resolveGitLabRemoteUrl(cwd: string): Promise<string | null> {
 
 function determineTargetBranch(target?: string): string {
   if (!target) {
-    console.log(`Rebasing onto branch ${q("main")}.`);
+    stderr(`Rebasing onto branch ${q("main")}.`);
     return "main";
   }
   return target;

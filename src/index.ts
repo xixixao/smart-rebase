@@ -33,17 +33,18 @@ async function rebaseUnmergedCommitsOnCurrentBranch(
 ): Promise<void> {
   const projectId = await getProjectId(cwd);
 
-  const baseSha = await getBaseSha(cwd, target);
-
-  const [currentBranch, currentBranchCommits, mergedMatcher, targetCommits] = await withProgress(
+  const [baseSha, currentBranch, currentBranchCommits, mergedMatcher, targetCommits] = await withProgress(
     `Figuring out which commits to rebase...`,
-    async () =>
-      await Promise.all([
+    async () => {
+      const baseSha = await getBaseSha(cwd, target);
+      return await Promise.all([
+        baseSha,
         getCurrentBranch(cwd),
         getCurrentBranchCommits(cwd, baseSha),
         getMergedCommitMatcher(cwd, baseSha, projectId, target, auth, verbose),
         getCommitsBetween(cwd, baseSha, target),
-      ]),
+      ]);
+    },
   );
 
   // Stacked-branch case: when the target branch has its own commits ahead of the

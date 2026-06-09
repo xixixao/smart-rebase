@@ -344,9 +344,9 @@ test("--verbose prints HEAD short sha", async () => {
   const { repoPath } = await makeRepoWithDivergedBranch();
   const expectedSha = (await Bun.$`git rev-parse --short HEAD`.cwd(repoPath).text()).trim();
 
-  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath });
+  const { stderr, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
-  expect(stdout).toContain(`Current commit: \`${expectedSha}\``);
+  expect(stderr).toContain(`Current commit: \`${expectedSha}\``);
 });
 
 // --- auth tests ---

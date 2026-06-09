@@ -418,21 +418,19 @@ test("prints merged MRs with their commits", async () => {
     { id: mergedShas[1]!, short_id: mergedShas[1]!.slice(0, 8), title: "Add test for fix" },
   ]);
 
-  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath });
+  const { stderr, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("!1 Add feature");
-  expect(stdout).toContain(`${mergedShas[0]!.slice(0, 8)} Implement feature`);
-  expect(stdout).toContain("!2 Fix bug");
-  expect(stdout).toContain(`${mergedShas[1]!.slice(0, 8)} Fix the bug`);
-  expect(stdout).toContain(`${mergedShas[1]!.slice(0, 8)} Add test for fix`);
+  expect(stderr).toContain("!1 Add feature");
+  expect(stderr).toContain(`${mergedShas[0]!.slice(0, 8)} Implement feature`);
+  expect(stderr).toContain("!2 Fix bug");
+  expect(stderr).toContain(`${mergedShas[1]!.slice(0, 8)} Fix the bug`);
+  expect(stderr).toContain(`${mergedShas[1]!.slice(0, 8)} Add test for fix`);
 });
 
 test("outputs only the rebase summary when there are no merged MRs", async () => {
   const { stdout, exitCode } = await run([]);
   expect(exitCode).toBe(0);
-  expect(stdout.trim()).toBe(
-    "Rebasing onto branch `main`.\n" + "Rebasing `feature` onto `main`. Will rebase 1 commit.",
-  );
+  expect(stdout.trim()).toBe("Rebasing `feature` onto `main`. Will rebase 1 commit.");
 });
 
 test("fetches commits for all MRs", async () => {

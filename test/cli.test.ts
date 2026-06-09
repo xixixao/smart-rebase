@@ -213,6 +213,8 @@ async function run(
   let stderrBuffer = "";
   const origStdoutWrite = process.stdout.write;
   const origStderrWrite = process.stderr.write;
+  const origLog = console.log;
+  const origError = console.error;
   const origStdoutIsTTY = process.stdout.isTTY;
   const origStderrIsTTY = process.stderr.isTTY;
 
@@ -223,6 +225,12 @@ async function run(
   (process.stderr as NodeJS.WriteStream & { write: unknown }).write = (chunk: string | Uint8Array) => {
     stderrBuffer += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
     return true;
+  };
+  console.log = (...args: unknown[]) => {
+    stdoutBuffer += args.map(String).join(" ") + "\n";
+  };
+  console.error = (...args: unknown[]) => {
+    stderrBuffer += args.map(String).join(" ") + "\n";
   };
   (process.stderr as NodeJS.WriteStream & { isTTY: unknown }).isTTY = opts.stdIsTTY ?? false;
   (process.stdout as NodeJS.WriteStream & { isTTY: unknown }).isTTY = opts.stdIsTTY ?? false;
@@ -237,6 +245,8 @@ async function run(
     platformSpy.mockRestore();
     (process.stdout as NodeJS.WriteStream & { write: unknown }).write = origStdoutWrite;
     (process.stderr as NodeJS.WriteStream & { write: unknown }).write = origStderrWrite;
+    console.log = origLog;
+    console.error = origError;
     (process.stderr as NodeJS.WriteStream & { isTTY: unknown }).isTTY = origStderrIsTTY;
     (process.stdout as NodeJS.WriteStream & { isTTY: unknown }).isTTY = origStdoutIsTTY;
     for (const [key, val] of Object.entries(savedEnv)) {
@@ -310,19 +320,19 @@ test("uses colors instead of backticks when stdout is a TTY", async () => {
   const { stdout, exitCode } = await run([], { stdIsTTY: true });
   expect(exitCode).toBe(0);
   // ANSI codes are stripped here; names appear without backtick delimiters
-  expect(stdout.trim()).toBe("Rebasing onto branch main.\nRebasing feature onto main. Will rebase 1 commit.");
+  expect(stdout.trim()).toBe("Rebasing feature onto main. Will rebase 1 commit.");
 });
 
 test("--verbose flag is recognised", async () => {
   const { stdout, exitCode } = await run(["--verbose"]);
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("Rebasing onto branch `main`.\nRebasing `feature` onto `main`. Will rebase 1 commit.\n");
+  expect(stdout).toContain("Rebasing `feature` onto `main`. Will rebase 1 commit.\n");
 });
 
 test("-v alias works", async () => {
   const { stdout, exitCode } = await run(["-v"]);
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("Rebasing onto branch `main`.\nRebasing `feature` onto `main`. Will rebase 1 commit.\n");
+  expect(stdout).toContain("Rebasing `feature` onto `main`. Will rebase 1 commit.\n");
 });
 
 test("unknown flag exits with non-zero code", async () => {

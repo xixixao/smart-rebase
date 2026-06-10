@@ -1291,8 +1291,8 @@ test("exits with error when upstream tracking branch has unexpected format", asy
   await Bun.$`git config branch.main.merge refs/heads/feature`.cwd(repoPath).quiet();
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).not.toBe(0);
-  expect(stdout).toBe("Rebasing onto branch `main`.\n");
-  expect(stderr).toBe("Unexpected upstream format: feature\n");
+  expect(stdout).toBe("");
+  expect(stderr).toBe(TARGET_NOTE + "Unexpected upstream format: feature\n");
 });
 
 // --- author-date+title commit matching tests ---

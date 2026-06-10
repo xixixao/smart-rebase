@@ -458,7 +458,10 @@ test("exits with error when project cannot be determined", async () => {
 
 test("detects project from origin remote", async () => {
   const { repoPath } = await makeRepoWithDivergedBranch();
-  await Bun.$`git remote set-url origin git@gitlab.com:mygroup/myproject.git`.cwd(repoPath).quiet();
+  // Keep the fetchable bare remote (main's upstream) under another name so the
+  // target-branch update check still works; origin holds the GitLab URL.
+  await Bun.$`git remote rename origin bare`.cwd(repoPath).quiet();
+  await Bun.$`git remote add origin git@gitlab.com:mygroup/myproject.git`.cwd(repoPath).quiet();
 
   const { exitCode } = await run([], { cwd: repoPath, env: { GITLAB_PROJECT: undefined } });
   expect(exitCode).toBe(0);

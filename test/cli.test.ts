@@ -470,8 +470,14 @@ test("detects project from origin remote", async () => {
 
 test("detects project from the sole remote when it is not named origin", async () => {
   const { repoPath } = await makeRepoWithDivergedBranch();
-  await Bun.$`git remote remove origin`.cwd(repoPath).quiet();
-  await Bun.$`git remote add upstream git@gitlab.com:org/upstream-project.git`.cwd(repoPath).quiet();
+  // The sole remote must be fetchable (it is main's upstream) *and* have a
+  // GitLab-looking URL, so host the bare repo under a gitlab.com/… path.
+  const barePath = join(mkdtempSync("/tmp/smart-rebase-test-"), "gitlab.com", "org", "upstream-project");
+  mkdirSync(barePath, { recursive: true });
+  await Bun.$`git init --bare -b main ${barePath}`.quiet();
+  await Bun.$`git remote rename origin upstream`.cwd(repoPath).quiet();
+  await Bun.$`git remote set-url upstream ${barePath}`.cwd(repoPath).quiet();
+  await Bun.$`git push upstream main`.cwd(repoPath).quiet();
 
   const { exitCode } = await run([], { cwd: repoPath, env: { GITLAB_PROJECT: undefined } });
   expect(exitCode).toBe(0);

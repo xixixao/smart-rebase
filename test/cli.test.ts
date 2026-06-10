@@ -1064,11 +1064,12 @@ async function makeRepoWithRemoteAhead(): Promise<{ repoPath: string; remoteNewS
 }
 
 test("exits with error when target branch has no upstream tracking", async () => {
-  const repoPath = await makeGitRepo();
+  const repoPath = await makeGitRepo({}, { tracking: false });
   const { stderr, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).not.toBe(0);
-  expect(stderr.trim()).toBe(
-    "Branch `main` isn't tracking an upstream branch. Use something like: `git branch --set-upstream-to=origin/main main`",
+  expect(stderr).toBe(
+    "Rebasing onto branch `main`.\n" +
+      "Branch `main` isn't tracking an upstream branch. Use something like: `git branch --set-upstream-to=origin/main main`\n",
   );
 });
 

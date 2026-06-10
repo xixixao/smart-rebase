@@ -304,7 +304,7 @@ async function addMainTrackingRemote(repoPath: string, extraBranches: string[]):
     await Bun.$`git push -u origin main`.cwd(repoPath).quiet();
   }
   for (const branch of extraBranches) {
-    await Bun.$`git push origin ${branch}`.cwd(repoPath).quiet();
+    await Bun.$`git push -u origin ${branch}`.cwd(repoPath).quiet();
   }
 }
 
@@ -861,9 +861,9 @@ test("accepts custom target branch as positional arg", async () => {
   mockMRs = [{ iid: 5, title: "Release MR", target_branch: "release", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(5, [{ id: mergedSha, short_id: mergedSha.slice(0, 8), title: "merged feature work" }]);
 
-  const { stdout, exitCode } = await run(["release", "--verbose"], { cwd: repoPath });
+  const { stderr, exitCode } = await run(["release", "--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("!5 Release MR");
+  expect(stderr).toContain("!5 Release MR");
 });
 
 test("includes MR whose commit appears in the current branch", async () => {

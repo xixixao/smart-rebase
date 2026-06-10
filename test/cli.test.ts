@@ -1007,7 +1007,8 @@ test("refetches from baseDate when merge base moves backwards between runs", asy
 // --- target branch update tests ---
 
 const REBASE_SUMMARY = "Rebasing `feature` onto `main`. Will rebase 1 commit.";
-const DEFAULT_STDOUT = "Rebasing onto branch `main`.\n" + REBASE_SUMMARY;
+// Printed to stderr when no target branch argument is given.
+const TARGET_NOTE = "Rebasing onto branch `main`.\n";
 // Final-frame ink SelectInput renders (ANSI-stripped). Because ink rewrites its
 // view on each state change and we strip cursor-motion codes from stderr, only
 // the final frame survives: "Update" highlighted if the user pressed Enter
@@ -1026,7 +1027,9 @@ const UPDATE_PROMPT_SKIP_SELECTED =
   "❯ 2. Skip\n" +
   "\n" +
   "↑↓ to navigate · Enter to select\n";
-const UPDATE_SUCCESS = "Updating branch `main` from remote `origin`...\n" + "Branch `main` updated.\n";
+// Progress messages (withProgress) are only rendered on a TTY, so in tests
+// only the final confirmation line appears.
+const UPDATE_SUCCESS = "Branch `main` updated.\n";
 const STASH_PROMPT_STASH_SELECTED =
   "You have uncommitted changes.\n" +
   "\n" +
@@ -1041,8 +1044,6 @@ const STASH_PROMPT_SKIP_SELECTED =
   "❯ 2. Skip\n" +
   "\n" +
   "↑↓ to navigate · Enter to select\n";
-const STASH_PROGRESS = "Stashing changes...\n";
-const REBASE_PROGRESS = "Rebasing 1 commit onto `main`...\n";
 // git rebase prints "Rebasing (N/M)" per commit, then the final summary.
 const REBASE_SUCCESS = "Rebasing (1/1)\nSuccessfully rebased and updated `feature`.\n";
 // When baseSha equals target tip, git rebase --onto is a no-op.
@@ -1086,24 +1087,24 @@ test("shows no update prompt when target is already up to date with remote", asy
   const { stderr, stdout, exitCode } = await run([], { cwd: localPath });
   expect(exitCode).toBe(0);
   // feature is already on top of main, so rebase is a no-op
-  expect(stderr).toBe(REBASE_PROGRESS + REBASE_UPTODATE);
-  expect(stdout.trim()).toBe(DEFAULT_STDOUT);
+  expect(stderr).toBe(TARGET_NOTE + REBASE_UPTODATE);
+  expect(stdout.trim()).toBe(REBASE_SUMMARY);
 });
 
 test("shows update prompt when target branch is behind remote", async () => {
   const { repoPath } = await makeRepoWithRemoteAhead();
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_PROGRESS + REBASE_SUCCESS);
-  expect(stdout.trim()).toBe(DEFAULT_STDOUT);
+  expect(stderr).toBe(TARGET_NOTE + UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_SUCCESS);
+  expect(stdout.trim()).toBe(REBASE_SUMMARY);
 });
 
 test("updates target branch when user selects Update", async () => {
   const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_PROGRESS + REBASE_SUCCESS);
-  expect(stdout.trim()).toBe(DEFAULT_STDOUT);
+  expect(stderr).toBe(TARGET_NOTE + UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_SUCCESS);
+  expect(stdout.trim()).toBe(REBASE_SUMMARY);
   const localMainSha = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainSha).toBe(remoteNewSha);
 });
@@ -1119,11 +1120,9 @@ test("updates checked-out target branch so index and worktree match remote", asy
   const remoteNewSha = (await Bun.$`git rev-parse HEAD`.cwd(remotePath).text()).trim();
 
   const { stderr, stdout, exitCode } = await run([], { cwd: localPath, inkStdin: KEY_ENTER });
-  expect(exitCode).not.toBe(0);
-  expect(stderr).toBe(
-    UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + "No commits on branch `main` ahead of `main`.\n",
-  );
-  expect(stdout).toBe("Rebasing onto branch `main`.\n");
+  expect(exitCode).toBe(0);
+  expect(stderr).toBe(TARGET_NOTE + UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS);
+  expect(stdout).toBe("No commits on branch `main` ahead of `main`.\n");
   expect((await Bun.$`git rev-parse main`.cwd(localPath).text()).trim()).toBe(remoteNewSha);
   expect((await Bun.$`git rev-parse HEAD`.cwd(localPath).text()).trim()).toBe(remoteNewSha);
   const wtClean = await Bun.$`git diff --quiet && git diff --cached --quiet`.cwd(localPath).quiet().nothrow();
@@ -1136,8 +1135,8 @@ test("skips update when user selects Skip", async () => {
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_DOWN + KEY_ENTER });
   expect(exitCode).toBe(0);
   // main tip == baseSha here, so rebase --onto is a no-op
-  expect(stderr).toBe(UPDATE_PROMPT_SKIP_SELECTED + REBASE_PROGRESS + REBASE_UPTODATE);
-  expect(stdout.trim()).toBe(DEFAULT_STDOUT);
+  expect(stderr).toBe(TARGET_NOTE + UPDATE_PROMPT_SKIP_SELECTED + REBASE_UPTODATE);
+  expect(stdout.trim()).toBe(REBASE_SUMMARY);
   const localMainShaAfter = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainShaAfter).toBe(localMainShaBefore);
   expect(localMainShaAfter).not.toBe(remoteNewSha);
@@ -1151,9 +1150,11 @@ test("exits with error when target update fails due to diverged branches", async
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).not.toBe(0);
   expect(stderr).toBe(
-    UPDATE_PROMPT_UPDATE_SELECTED + "Cannot update branch `main`: it has diverged from branch `origin/main`.\n",
+    TARGET_NOTE +
+      UPDATE_PROMPT_UPDATE_SELECTED +
+      "Cannot update branch `main`: it has diverged from branch `origin/main`.\n",
   );
-  expect(stdout).toBe("Rebasing onto branch `main`.\n");
+  expect(stdout).toBe("");
 });
 
 // --- stash prompt tests ---
@@ -1170,8 +1171,8 @@ test("shows stash prompt before update prompt when dirty changes exist", async (
   const { stderr, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER + KEY_ENTER });
   expect(exitCode).toBe(0);
   // git stash output includes a dynamic SHA, so check the static parts around it
-  expect(stderr.startsWith(STASH_PROMPT_STASH_SELECTED + STASH_PROGRESS)).toBe(true);
-  expect(stderr.endsWith(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_PROGRESS + REBASE_SUCCESS)).toBe(true);
+  expect(stderr.startsWith(STASH_PROMPT_STASH_SELECTED + "Saved working directory")).toBe(true);
+  expect(stderr.endsWith(TARGET_NOTE + UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_SUCCESS)).toBe(true);
 });
 
 test("stashes changes when user selects Stash", async () => {
@@ -1189,9 +1190,9 @@ test("does not stash when user selects Skip on stash prompt", async () => {
   expect(exitCode).not.toBe(0);
   expect(stderr).toBe(
     STASH_PROMPT_SKIP_SELECTED +
+      TARGET_NOTE +
       UPDATE_PROMPT_UPDATE_SELECTED +
       UPDATE_SUCCESS +
-      REBASE_PROGRESS +
       "error: cannot rebase: Your index contains uncommitted changes.\n" +
       "error: Please commit or stash them.\n",
   );
@@ -1204,7 +1205,7 @@ test("no stash prompt shown when working tree is clean", async () => {
   const { repoPath } = await makeRepoWithRemoteAhead();
   const { stderr, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_PROGRESS + REBASE_SUCCESS);
+  expect(stderr).toBe(TARGET_NOTE + UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_SUCCESS);
 });
 
 // --- rebase tests ---
@@ -1214,8 +1215,8 @@ test("rebases current branch onto target after listing MRs", async () => {
   const mainTip = defaultMainShas[1]!;
   const { stdout, stderr, exitCode } = await run([]);
   expect(exitCode).toBe(0);
-  expect(stdout.trim()).toBe(DEFAULT_STDOUT);
-  expect(stderr).toBe(REBASE_PROGRESS + REBASE_SUCCESS);
+  expect(stdout.trim()).toBe(REBASE_SUMMARY);
+  expect(stderr).toBe(TARGET_NOTE + REBASE_SUCCESS);
   // After rebase, feature's parent should be main's tip.
   const featureParent = (await Bun.$`git rev-parse HEAD~1`.cwd(defaultTestCwd).text()).trim();
   expect(featureParent).toBe(mainTip);

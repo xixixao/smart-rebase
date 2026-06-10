@@ -905,14 +905,17 @@ test("prints message and exits cleanly when branch has no commits ahead of targe
   expect(stdout).toBe("No commits on branch `main` ahead of `main`.\n");
 });
 
-test("exits with error when all commits have already been merged", async () => {
+test("checks out target when all commits have already been merged", async () => {
   const { repoPath, featureCommitSha } = await makeRepoWithDivergedBranch();
   mockMRs = [{ iid: 1, title: "Feature MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, [{ id: featureCommitSha, short_id: featureCommitSha.slice(0, 8), title: "feature work" }]);
 
-  const { stderr, exitCode } = await run([], { cwd: repoPath });
-  expect(exitCode).not.toBe(0);
-  expect(stderr.trim()).toBe("The 1 commit on branch `feature` has already been merged to `main`.");
+  const { stdout, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).toBe(0);
+  expect(stdout).toBe(
+    "The 1 commit on branch `feature` has already been merged to `main`.\nSwitching to branch `main`.\n",
+  );
+  expect((await Bun.$`git rev-parse --abbrev-ref HEAD`.cwd(repoPath).text()).trim()).toBe("main");
 });
 
 test("exits with error when target branch does not exist", async () => {

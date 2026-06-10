@@ -499,6 +499,8 @@ test("uses origin when both origin and another remote exist", async () => {
 
 test("errors when multiple remotes exist and none is named origin", async () => {
   const repoPath = await makeGitRepo({ foo: "git@gitlab.com:foo/project.git", bar: "git@gitlab.com:bar/project.git" });
+  // The fixture's fetchable remote is named origin; rename it so no remote is.
+  await Bun.$`git remote rename origin bare`.cwd(repoPath).quiet();
 
   const { stderr, exitCode } = await run([], { cwd: repoPath, env: { GITLAB_PROJECT: undefined } });
   expect(exitCode).not.toBe(0);
@@ -924,6 +926,19 @@ test("exits with error when target branch does not exist", async () => {
   const { stderr, exitCode } = await run(["nonexistent-branch"], { cwd: repoPath });
   expect(exitCode).not.toBe(0);
   expect(stderr).toContain("nonexistent-branch");
+});
+
+test("exits with error when HEAD shares no history with target branch", async () => {
+  const repoPath = await makeGitRepo();
+  await Bun.$`git checkout --orphan orphan`.cwd(repoPath).quiet();
+  await Bun.$`git commit --allow-empty -m "orphan commit"`.cwd(repoPath).quiet();
+
+  const { stderr, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toBe(
+    TARGET_NOTE +
+      "Cannot find merge base with branch `main`. Make sure the branch exists and has commits in common with HEAD.\n",
+  );
 });
 
 // --- pagination tests ---

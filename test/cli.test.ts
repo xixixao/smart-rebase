@@ -897,12 +897,12 @@ test("excludes MRs where merged_at is before base commit date", async () => {
   expect(stdout).not.toContain("!4 Old merged MR");
 });
 
-test("exits with error when branch has no commits ahead of target", async () => {
+test("prints message and exits cleanly when branch has no commits ahead of target", async () => {
   const repoPath = await makeGitRepo();
   // HEAD == merge-base with main → 0 current-branch commits
-  const { stderr, exitCode } = await run([], { cwd: repoPath });
-  expect(exitCode).not.toBe(0);
-  expect(stderr.trim()).toBe("No commits on branch `main` ahead of `main`.");
+  const { stdout, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).toBe(0);
+  expect(stdout).toBe("No commits on branch `main` ahead of `main`.\n");
 });
 
 test("exits with error when all commits have already been merged", async () => {

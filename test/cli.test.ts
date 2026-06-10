@@ -1347,7 +1347,7 @@ test("scenario 1: matches MR commits by author-date and title when SHAs differ",
   const { stdout, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).toBe(0);
   expect(stdout).toContain(
-    "Rebasing `feature-b` onto `main`. 2 commits have already been merged to `main`. Will rebase 2 commits.\n",
+    "Rebasing `feature-b` onto `main`.  2 commits have already been merged to `main`. Will rebase 2 commits.\n",
   );
   // Only b1 and b2 remain on the rebased branch.
   const log = (await Bun.$`git log --format=%s ${"main"}..HEAD`.cwd(repoPath).text()).trim().split("\n");

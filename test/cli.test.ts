@@ -1429,6 +1429,8 @@ test("scenario 3: combines GitLab merged-MR matching with local target matching"
   await Bun.$`git checkout feature-a`.cwd(repoPath).quiet();
   await commitWithDate(repoPath, "feat: a1", D_A1, { allowEmpty: true });
   await commitWithDate(repoPath, "feat: a2", D_A2, { allowEmpty: true });
+  // feature-a is the rebase target, so it needs upstream tracking.
+  await Bun.$`git push -u origin feature-a`.cwd(repoPath).quiet();
 
   // Mock GitLab so the merged MR for C lists its original commits.
   mockMRs = [{ iid: 99, title: "MR C", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
@@ -1442,7 +1444,7 @@ test("scenario 3: combines GitLab merged-MR matching with local target matching"
   expect(exitCode).toBe(0);
   // 4 commits dropped: c1 and c2 (via GitLab MR) + a1 and a2 (via target branch).
   expect(stdout).toContain(
-    "Rebasing `feature-b` onto `feature-a`. 4 commits have already been merged to `feature-a`. Will rebase 2 commits.\n",
+    "Rebasing `feature-b` onto `feature-a`.  4 commits have already been merged to `feature-a`. Will rebase 2 commits.\n",
   );
   const aTip = (await Bun.$`git rev-parse feature-a`.cwd(repoPath).text()).trim();
   const bParent = (await Bun.$`git rev-parse HEAD~2`.cwd(repoPath).text()).trim();

@@ -1379,13 +1379,15 @@ test("scenario 2: matches commits against a local target branch (stacked rebase)
   await Bun.$`git checkout feature-a`.cwd(repoPath).quiet();
   await commitWithDate(repoPath, "feat: a1", D_A1, { allowEmpty: true });
   await commitWithDate(repoPath, "feat: a2", D_A2, { allowEmpty: true });
+  // feature-a is the rebase target, so it needs upstream tracking.
+  await Bun.$`git push -u origin feature-a`.cwd(repoPath).quiet();
 
   // Now rebase B onto the rebased A.
   await Bun.$`git checkout feature-b`.cwd(repoPath).quiet();
   const { stdout, exitCode } = await run(["feature-a"], { cwd: repoPath });
   expect(exitCode).toBe(0);
   expect(stdout).toContain(
-    "Rebasing `feature-b` onto `feature-a`. 2 commits have already been merged to `feature-a`. Will rebase 2 commits.\n",
+    "Rebasing `feature-b` onto `feature-a`.  2 commits have already been merged to `feature-a`. Will rebase 2 commits.\n",
   );
   // B is now strictly A + b1 + b2.
   const aTip = (await Bun.$`git rev-parse feature-a`.cwd(repoPath).text()).trim();

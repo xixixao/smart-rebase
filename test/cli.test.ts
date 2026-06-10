@@ -840,10 +840,10 @@ test("defaults target branch to main", async () => {
   mockCommits.set(1, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "feature work" }]);
   mockCommits.set(2, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "feature work" }]);
 
-  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath });
+  const { stderr, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("!1 MR on main");
-  expect(stdout).not.toContain("!2 Unrelated MR");
+  expect(stderr).toContain("!1 MR on main");
+  expect(stderr).not.toContain("!2 Unrelated MR");
 });
 
 test("accepts custom target branch as positional arg", async () => {

@@ -1492,7 +1492,7 @@ test("scenario 4: drops squash-merged middle commits matched by author-date+titl
   const { stdout, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).toBe(0);
   expect(stdout).toContain(
-    "Rebasing `feature-c` onto `main`. 2 commits have already been merged to `main`. Will rebase 4 commits.\n",
+    "Rebasing `feature-c` onto `main`.  2 commits have already been merged to `main`. Will rebase 4 commits.\n",
   );
   // After the rebase: main's tip → A1' → A2' → C1' → C2'. B's commits are gone.
   const log = (await Bun.$`git log --format=%s main..HEAD`.cwd(repoPath).text()).trim().split("\n");

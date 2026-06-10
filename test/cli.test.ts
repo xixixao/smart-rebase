@@ -1240,14 +1240,17 @@ test("skips already-merged commits and rebases only the remaining ones", async (
 
   const { stdout, stderr, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
-  expect(stdout).toContain(
-    `Current commit: \`${newWorkShortSha}\`\n` +
-      "Rebasing onto branch `main`.\n" +
-      "!1 Merged MR\n" +
-      `  ${mergedShortSha} merged commit\n` +
-      "Rebasing `feature` onto `main`. 1 commit has already been merged to `main`. Will rebase 1 commit.\n",
+  expect(stdout).toBe(
+    "Rebasing `feature` onto `main`.  1 commit has already been merged to `main`. Will rebase 1 commit.\n",
   );
-  expect(stderr).toBe(REBASE_PROGRESS + REBASE_SUCCESS);
+  expect(stderr).toBe(
+    `Current commit: \`${newWorkShortSha}\`\n` +
+      TARGET_NOTE +
+      "Considering 1 MRs for rebasing:\n" +
+      "  !1 Merged MR\n" +
+      `    ${mergedShortSha} merged commit\n` +
+      REBASE_SUCCESS,
+  );
   // After rebase, "new work" is on top of main's new commit; "merged commit" was dropped.
   const headParent = (await Bun.$`git rev-parse --short HEAD~1`.cwd(repoPath).text()).trim();
   expect(headParent).toBe(mainShortSha);

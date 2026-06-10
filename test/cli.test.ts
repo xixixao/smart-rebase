@@ -724,6 +724,9 @@ test("exits with error when cwd is not a git repository", async () => {
 
 test("exits with error when remote exists but has no URL configured", async () => {
   const repoPath = await makeGitRepo();
+  // Keep main's upstream fetchable under another name; origin (the remote
+  // project detection picks) is left without a URL.
+  await Bun.$`git remote rename origin bare`.cwd(repoPath).quiet();
   await Bun.$`git remote add origin git@gitlab.com:foo/bar`.cwd(repoPath).quiet();
   await Bun.$`git config --unset remote.origin.url`.cwd(repoPath).quiet();
 

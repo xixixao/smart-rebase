@@ -670,11 +670,11 @@ test("fresh data replaces cached version of same MR", async () => {
 
   mockMRs = [{ iid: 1, title: "Updated title", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(1, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "the commit" }]);
-  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath, env: { GITLAB_DATA_DIR: tmpDir } });
+  const { stderr, exitCode } = await run(["--verbose"], { cwd: repoPath, env: { GITLAB_DATA_DIR: tmpDir } });
 
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("Updated title");
-  expect(stdout).not.toContain("Old title");
+  expect(stderr).toContain("Updated title");
+  expect(stderr).not.toContain("Old title");
 });
 
 // --- error handling tests ---

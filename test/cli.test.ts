@@ -486,6 +486,9 @@ test("detects project from the sole remote when it is not named origin", async (
 
 test("uses origin when both origin and another remote exist", async () => {
   const { repoPath } = await makeRepoWithDivergedBranch();
+  // Keep the fetchable bare remote (main's upstream) under another name; the
+  // GitLab URLs go on origin and a second remote.
+  await Bun.$`git remote rename origin bare`.cwd(repoPath).quiet();
   await Bun.$`git remote add origin git@gitlab.com:maingroup/mainproject.git`.cwd(repoPath).quiet();
   await Bun.$`git remote add fork git@gitlab.com:forkgroup/forkproject.git`.cwd(repoPath).quiet();
 

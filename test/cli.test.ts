@@ -871,9 +871,9 @@ test("includes MR whose commit appears in the current branch", async () => {
   mockMRs = [{ iid: 3, title: "Squash MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
   mockCommits.set(3, [{ id: mergedShas[0]!, short_id: mergedShas[0]!.slice(0, 8), title: "squashed" }]);
 
-  const { stdout, exitCode } = await run(["--verbose"], { cwd: repoPath });
+  const { stderr, exitCode } = await run(["--verbose"], { cwd: repoPath });
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("!3 Squash MR");
+  expect(stderr).toContain("!3 Squash MR");
 });
 
 test("excludes MRs whose commits do not appear in the current branch", async () => {

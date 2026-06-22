@@ -15,7 +15,7 @@ export function createCli(argv = hideBin(process.argv)) {
     .option("verbose", { alias: "v", type: "boolean", description: "Enable verbose output", default: false })
     .strict()
     .wrap(null)
-    .exitProcess(false);
+    .exitProcess(process.env.NODE_ENV !== "test");
 }
 
 export type Argv = Awaited<ReturnType<ReturnType<typeof createCli>["parseAsync"]>> & { target: string };

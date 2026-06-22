@@ -59,3 +59,12 @@ Flags:
 
 - `--only=<name>` — run a single scenario by name
 - `--interactive` — pause before each step and require Enter
+
+## Testing local version
+
+You can install from where you have checked out this repo, then use `smart-rebase` in any repo on your machine:
+
+```bash
+bun install -g <absolute path to this repo>
+# f.e.: `bun install -g ~/development/smart-rebase`
+```

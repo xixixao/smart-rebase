@@ -66,6 +66,14 @@ Everything is configured through environment variables; none are required when w
 | `GITLAB_PROJECT`  | Project path or ID, if it can't be derived from the git remote URL.                       |
 | `GITLAB_DATA_DIR` | Where credentials and the MR cache are stored (defaults to the platform data dir).        |
 
+## Update
+
+To update to the latest version, run:
+```sh
+bun remove -g smart-rebase
+bun install -g github:xixixao/smart-rebase
+```
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, tests, and coverage requirements.

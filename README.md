@@ -17,7 +17,7 @@ curl -fsSL https://bun.sh/install | bash
 
 Install the command:
 ```sh
-bun install -g @xixixao/smart-rebase
+bun install -g github:xixixao/smart-rebase
 ```
 
 This makes the `smart-rebase` command available globally.

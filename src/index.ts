@@ -20,7 +20,7 @@ export async function main(args: string[], opts: { cwd?: string; stdin?: NodeJS.
 
   const target = determineTargetBranch(argv.target);
 
-  await checkAndUpdateTargetBranch(cwd, target, opts.stdin);
+  await checkAndUpdateTargetBranch(cwd, target);
 
   await rebaseUnmergedCommitsOnCurrentBranch(cwd, target, auth, argv.verbose);
 }
@@ -302,7 +302,7 @@ async function checkAndStashDirtyChanges(cwd: string, stdin?: NodeJS.ReadableStr
   }
 }
 
-async function checkAndUpdateTargetBranch(cwd: string, target: string, stdin?: NodeJS.ReadableStream): Promise<void> {
+async function checkAndUpdateTargetBranch(cwd: string, target: string): Promise<void> {
   let upstream: string;
   try {
     upstream = await withProgress("Finding upstream...", async () =>
@@ -331,32 +331,21 @@ async function checkAndUpdateTargetBranch(cwd: string, target: string, stdin?: N
     return;
   }
 
-  const choice = await selectPrompt(
-    `Branch ${q(target)} is not up-to-date.`,
-    [
-      { label: `Update branch ${q(target)} from remote ${q(remoteName)}`, value: "update" },
-      { label: "Skip", value: "skip" },
-    ],
-    stdin,
-  );
-
-  if (choice === "update") {
-    // Fast-forward the local branch to the already-fetched tracking ref.
-    // merge-base --is-ancestor exits non-zero when local has diverged.
-    const ff = await Bun.$`git merge-base --is-ancestor ${target} ${upstream}`.cwd(cwd).quiet().nothrow();
-    if (ff.exitCode !== 0) {
-      throw new Error(`Cannot update branch ${q(target)}: it has diverged from branch ${q(upstream)}.`);
-    }
-    await withProgress(`Updating branch ${q(target)} from remote ${q(remoteName)}...`, async () => {
-      const currentBranch = (await Bun.$`git branch --show-current`.cwd(cwd).quiet().text()).trim();
-      if (currentBranch === target) {
-        await Bun.$`git reset --hard ${upstream}`.cwd(cwd).quiet();
-      } else {
-        await Bun.$`git branch -f ${target} ${upstream}`.cwd(cwd).quiet();
-      }
-    });
-    stderr(`Branch ${q(target)} updated.`);
+  // Fast-forward the local branch to the already-fetched tracking ref.
+  // merge-base --is-ancestor exits non-zero when local has diverged.
+  const ff = await Bun.$`git merge-base --is-ancestor ${target} ${upstream}`.cwd(cwd).quiet().nothrow();
+  if (ff.exitCode !== 0) {
+    throw new Error(`Cannot update branch ${q(target)}: it has diverged from branch ${q(upstream)}.`);
   }
+  await withProgress(`Updating branch ${q(target)} from remote ${q(remoteName)}...`, async () => {
+    const currentBranch = (await Bun.$`git branch --show-current`.cwd(cwd).quiet().text()).trim();
+    if (currentBranch === target) {
+      await Bun.$`git reset --hard ${upstream}`.cwd(cwd).quiet();
+    } else {
+      await Bun.$`git branch -f ${target} ${upstream}`.cwd(cwd).quiet();
+    }
+  });
+  stderr(`Branch ${q(target)} updated.`);
 }
 
 async function getProjectId(cwd: string): Promise<string> {

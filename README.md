@@ -14,8 +14,8 @@ Install [Bun](https://bun.com) if you don't have it yet:
 curl -fsSL https://bun.sh/install | bash
 ```
 
-
 Install the command:
+
 ```sh
 bun install -g github:xixixao/smart-rebase
 ```
@@ -69,6 +69,7 @@ Everything is configured through environment variables; none are required when w
 ## Update
 
 To update to the latest version, run:
+
 ```sh
 bun remove -g smart-rebase
 bun install -g github:xixixao/smart-rebase

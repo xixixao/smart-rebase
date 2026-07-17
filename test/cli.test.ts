@@ -1024,27 +1024,13 @@ test("refetches from baseDate when merge base moves backwards between runs", asy
 const REBASE_SUMMARY = "Rebasing `feature` onto `main`. Will rebase 1 commit.";
 // Printed to stderr when no target branch argument is given.
 const TARGET_NOTE = "Rebasing onto branch `main`.\n";
-// Final-frame ink SelectInput renders (ANSI-stripped). Because ink rewrites its
-// view on each state change and we strip cursor-motion codes from stderr, only
-// the final frame survives: "Update" highlighted if the user pressed Enter
-// directly, "Skip" highlighted if they navigated down first.
-const UPDATE_PROMPT_UPDATE_SELECTED =
-  "Branch `main` is not up-to-date.\n" +
-  "\n" +
-  "❯ 1. Update branch `main` from remote `origin`\n" +
-  "  2. Skip\n" +
-  "\n" +
-  "↑↓ to navigate · Enter to select\n";
-const UPDATE_PROMPT_SKIP_SELECTED =
-  "Branch `main` is not up-to-date.\n" +
-  "\n" +
-  "  1. Update branch `main` from remote `origin`\n" +
-  "❯ 2. Skip\n" +
-  "\n" +
-  "↑↓ to navigate · Enter to select\n";
 // Progress messages (withProgress) are only rendered on a TTY, so in tests
 // only the final confirmation line appears.
 const UPDATE_SUCCESS = "Branch `main` updated.\n";
+// Final-frame ink SelectInput renders (ANSI-stripped). Because ink rewrites its
+// view on each state change and we strip cursor-motion codes from stderr, only
+// the final frame survives: "Stash" highlighted if the user pressed Enter
+// directly, "Skip" highlighted if they navigated down first.
 const STASH_PROMPT_STASH_SELECTED =
   "You have uncommitted changes.\n" +
   "\n" +
@@ -1089,7 +1075,7 @@ test("exits with error when target branch has no upstream tracking", async () =>
   );
 });
 
-test("shows no update prompt when target is already up to date with remote", async () => {
+test("does not update target when it is already up to date with remote", async () => {
   const remotePath = await makeGitRepo();
   const localPath = mkdtempSync("/tmp/smart-rebase-test-");
   await Bun.$`git clone ${remotePath} ${localPath}`.quiet();
@@ -1106,19 +1092,11 @@ test("shows no update prompt when target is already up to date with remote", asy
   expect(stdout.trim()).toBe(REBASE_SUMMARY);
 });
 
-test("shows update prompt when target branch is behind remote", async () => {
-  const { repoPath } = await makeRepoWithRemoteAhead();
-  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
-  expect(exitCode).toBe(0);
-  expect(stderr).toBe(TARGET_NOTE + UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_SUCCESS);
-  expect(stdout.trim()).toBe(REBASE_SUMMARY);
-});
-
-test("updates target branch when user selects Update", async () => {
+test("updates target branch automatically when behind remote", async () => {
   const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
-  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(TARGET_NOTE + UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_SUCCESS);
+  expect(stderr).toBe(TARGET_NOTE + UPDATE_SUCCESS + REBASE_SUCCESS);
   expect(stdout.trim()).toBe(REBASE_SUMMARY);
   const localMainSha = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
   expect(localMainSha).toBe(remoteNewSha);
@@ -1134,9 +1112,9 @@ test("updates checked-out target branch so index and worktree match remote", asy
   await Bun.$`git commit --allow-empty -m "new remote commit"`.cwd(remotePath).quiet();
   const remoteNewSha = (await Bun.$`git rev-parse HEAD`.cwd(remotePath).text()).trim();
 
-  const { stderr, stdout, exitCode } = await run([], { cwd: localPath, inkStdin: KEY_ENTER });
+  const { stderr, stdout, exitCode } = await run([], { cwd: localPath });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(TARGET_NOTE + UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS);
+  expect(stderr).toBe(TARGET_NOTE + UPDATE_SUCCESS);
   expect(stdout).toBe("No commits on branch `main` ahead of `main`.\n");
   expect((await Bun.$`git rev-parse main`.cwd(localPath).text()).trim()).toBe(remoteNewSha);
   expect((await Bun.$`git rev-parse HEAD`.cwd(localPath).text()).trim()).toBe(remoteNewSha);
@@ -1144,31 +1122,14 @@ test("updates checked-out target branch so index and worktree match remote", asy
   expect(wtClean.exitCode).toBe(0);
 });
 
-test("skips update when user selects Skip", async () => {
-  const { repoPath, remoteNewSha } = await makeRepoWithRemoteAhead();
-  const localMainShaBefore = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
-  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_DOWN + KEY_ENTER });
-  expect(exitCode).toBe(0);
-  // main tip == baseSha here, so rebase --onto is a no-op
-  expect(stderr).toBe(TARGET_NOTE + UPDATE_PROMPT_SKIP_SELECTED + REBASE_UPTODATE);
-  expect(stdout.trim()).toBe(REBASE_SUMMARY);
-  const localMainShaAfter = (await Bun.$`git rev-parse main`.cwd(repoPath).text()).trim();
-  expect(localMainShaAfter).toBe(localMainShaBefore);
-  expect(localMainShaAfter).not.toBe(remoteNewSha);
-});
-
-test("exits with error when target update fails due to diverged branches", async () => {
+test("exits with error when target has diverged from remote", async () => {
   const { repoPath } = await makeRepoWithRemoteAhead();
   await Bun.$`git checkout main`.cwd(repoPath).quiet();
   await Bun.$`git commit --allow-empty -m "local only commit"`.cwd(repoPath).quiet();
   await Bun.$`git checkout feature`.cwd(repoPath).quiet();
-  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).not.toBe(0);
-  expect(stderr).toBe(
-    TARGET_NOTE +
-      UPDATE_PROMPT_UPDATE_SELECTED +
-      "Cannot update branch `main`: it has diverged from branch `origin/main`.\n",
-  );
+  expect(stderr).toBe(TARGET_NOTE + "Cannot update branch `main`: it has diverged from branch `origin/main`.\n");
   expect(stdout).toBe("");
 });
 
@@ -1181,18 +1142,18 @@ async function makeRepoWithRemoteAheadAndDirty(): Promise<{ repoPath: string; re
   return result;
 }
 
-test("shows stash prompt before update prompt when dirty changes exist", async () => {
+test("shows stash prompt before target update when dirty changes exist", async () => {
   const { repoPath } = await makeRepoWithRemoteAheadAndDirty();
-  const { stderr, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER + KEY_ENTER });
+  const { stderr, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
   // git stash output includes a dynamic SHA, so check the static parts around it
   expect(stderr.startsWith(STASH_PROMPT_STASH_SELECTED + "Saved working directory")).toBe(true);
-  expect(stderr.endsWith(TARGET_NOTE + UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_SUCCESS)).toBe(true);
+  expect(stderr.endsWith(TARGET_NOTE + UPDATE_SUCCESS + REBASE_SUCCESS)).toBe(true);
 });
 
 test("stashes changes when user selects Stash", async () => {
   const { repoPath } = await makeRepoWithRemoteAheadAndDirty();
-  const { exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER + KEY_ENTER });
+  const { exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
   expect(exitCode).toBe(0);
   const stashList = (await Bun.$`git stash list`.cwd(repoPath).text()).trim();
   expect(stashList).not.toBe("");
@@ -1200,13 +1161,12 @@ test("stashes changes when user selects Stash", async () => {
 
 test("does not stash when user selects Skip on stash prompt", async () => {
   const { repoPath } = await makeRepoWithRemoteAheadAndDirty();
-  const { stderr, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_DOWN + KEY_ENTER + KEY_ENTER });
+  const { stderr, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_DOWN + KEY_ENTER });
   // Staged changes were not stashed, so git rebase refuses to run.
   expect(exitCode).not.toBe(0);
   expect(stderr).toBe(
     STASH_PROMPT_SKIP_SELECTED +
       TARGET_NOTE +
-      UPDATE_PROMPT_UPDATE_SELECTED +
       UPDATE_SUCCESS +
       "error: cannot rebase: Your index contains uncommitted changes.\n" +
       "error: Please commit or stash them.\n",
@@ -1218,9 +1178,9 @@ test("does not stash when user selects Skip on stash prompt", async () => {
 
 test("no stash prompt shown when working tree is clean", async () => {
   const { repoPath } = await makeRepoWithRemoteAhead();
-  const { stderr, exitCode } = await run([], { cwd: repoPath, inkStdin: KEY_ENTER });
+  const { stderr, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).toBe(0);
-  expect(stderr).toBe(TARGET_NOTE + UPDATE_PROMPT_UPDATE_SELECTED + UPDATE_SUCCESS + REBASE_SUCCESS);
+  expect(stderr).toBe(TARGET_NOTE + UPDATE_SUCCESS + REBASE_SUCCESS);
 });
 
 // --- rebase tests ---

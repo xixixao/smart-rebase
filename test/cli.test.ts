@@ -37,7 +37,10 @@ const mockGitLab = Bun.serve({
       if (mockCommitsErrorIid !== null && iid === mockCommitsErrorIid) {
         return new Response("Internal Server Error", { status: 500 });
       }
-      return Response.json(mockCommits.get(iid) ?? []);
+      // Real GitLab paginates this endpoint with a default page size of 20.
+      const page = parseInt(url.searchParams.get("page") ?? "1");
+      const perPage = parseInt(url.searchParams.get("per_page") ?? "20");
+      return Response.json((mockCommits.get(iid) ?? []).slice((page - 1) * perPage, page * perPage));
     }
     if (pathname.match(/\/merge_requests$/)) {
       mrPagesFetched++;
@@ -963,6 +966,25 @@ test("paginates to fetch MRs until updated_at falls before base commit date", as
   const { exitCode } = await run([], { env: { GITLAB_PER_PAGE: "1" } });
   expect(exitCode).toBe(0);
   expect(mrPagesFetched).toBe(2);
+});
+
+test("paginates MR commits so large squashed MRs are fully matched", async () => {
+  const { repoPath, mergedShas } = await makeRepoWithMergedAndNewFeature(2);
+  mockMRs = [{ iid: 7, title: "Big MR", target_branch: "main", merged_at: RECENT, updated_at: RECENT }];
+  mockCommits.set(
+    7,
+    mergedShas.map((sha, i) => ({ id: sha, short_id: sha.slice(0, 8), title: `merged commit ${i + 1}` })),
+  );
+
+  const { stdout, exitCode } = await run([], { cwd: repoPath, env: { GITLAB_PER_PAGE: "1" } });
+  expect(exitCode).toBe(0);
+  // Both merged commits sit on page 1 and 2 of the commits endpoint; without
+  // pagination only the first would be fetched and the second re-applied.
+  expect(stdout).toBe(
+    "Rebasing `feature` onto `main`.  2 commits have already been merged to `main`. Will rebase 1 commit.\n",
+  );
+  // Pages 1 and 2 return one commit each, page 3 is empty and stops the loop.
+  expect(mockCommitsRequestCount).toBe(3);
 });
 
 test("second run stops MR pagination at newest cached updated_at when merge base unchanged", async () => {

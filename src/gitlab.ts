@@ -61,15 +61,25 @@ export async function fetchMergedMRsSince(opts: {
 
   return Promise.all(
     allMrs.map(async (mr) => {
-      const commitsRes = await fetch(`${baseUrl}/api/v4/projects/${encodedProject}/merge_requests/${mr.iid}/commits`, {
-        headers,
-      });
-      if (!commitsRes.ok) {
-        throw new Error(`GitLab API error ${commitsRes.status} for MR !${mr.iid}: ${await commitsRes.text()}`);
+      // Paginate: GitLab caps this endpoint at its default page size (20)
+      // unless per_page/page are passed, silently truncating large MRs.
+      const commits: MRCommit[] = [];
+      let commitsPage = 1;
+      while (true) {
+        const commitsRes = await fetch(
+          `${baseUrl}/api/v4/projects/${encodedProject}/merge_requests/${mr.iid}/commits?per_page=${perPage}&page=${commitsPage}`,
+          { headers },
+        );
+        if (!commitsRes.ok) {
+          throw new Error(`GitLab API error ${commitsRes.status} for MR !${mr.iid}: ${await commitsRes.text()}`);
+        }
+        const commitsData = await commitsRes.json();
+        const batch = MRCommitArray(commitsData);
+        if (batch instanceof type.errors) throw new Error(`Invalid commits for MR !${mr.iid}: ${batch.summary}`);
+        commits.push(...batch);
+        if (batch.length < perPage) break;
+        commitsPage++;
       }
-      const commitsData = await commitsRes.json();
-      const commits = MRCommitArray(commitsData);
-      if (commits instanceof type.errors) throw new Error(`Invalid commits for MR !${mr.iid}: ${commits.summary}`);
       return { mr, commits };
     }),
   );

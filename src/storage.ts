@@ -6,7 +6,9 @@ import { getGitlabUrl } from "./gitlab";
 import { getDataDir } from "./paths";
 import { q } from "./format";
 
-const CACHE_VERSION = 6;
+// v7: v6 caches may hold commit lists truncated to GitLab's default page
+// size (20); the pagination floor would never refetch those MRs.
+const CACHE_VERSION = 7;
 
 const CachedCommit = type({ id: "string", short_id: "string", title: "string", "authored_date?": "string" });
 

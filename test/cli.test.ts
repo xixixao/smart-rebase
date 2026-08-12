@@ -1,5 +1,5 @@
 import { test, expect, afterAll, beforeAll, beforeEach, jest } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import { main } from "../src/index";
@@ -1152,6 +1152,20 @@ test("exits with error when target has diverged from remote", async () => {
   const { stderr, stdout, exitCode } = await run([], { cwd: repoPath });
   expect(exitCode).not.toBe(0);
   expect(stderr).toBe(TARGET_NOTE + "Cannot update branch `main`: it has diverged from branch `origin/main`.\n");
+  expect(stdout).toBe("");
+});
+
+test("exits with error when target is checked out in another worktree", async () => {
+  const { repoPath } = await makeRepoWithRemoteAhead();
+  const worktreePath = join(mkdtempSync("/tmp/smart-rebase-test-"), "main-wt");
+  await Bun.$`git worktree add ${worktreePath} main`.cwd(repoPath).quiet();
+  const reportedPath = realpathSync(worktreePath);
+  const { stderr, stdout, exitCode } = await run([], { cwd: repoPath });
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toBe(
+    TARGET_NOTE +
+      `Cannot update branch \`main\`: cannot force update the branch 'main' used by worktree at '${reportedPath}'\n`,
+  );
   expect(stdout).toBe("");
 });
 

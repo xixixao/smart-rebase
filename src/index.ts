@@ -339,10 +339,15 @@ async function checkAndUpdateTargetBranch(cwd: string, target: string): Promise<
   }
   await withProgress(`Updating branch ${q(target)} from remote ${q(remoteName)}...`, async () => {
     const currentBranch = (await Bun.$`git branch --show-current`.cwd(cwd).quiet().text()).trim();
-    if (currentBranch === target) {
-      await Bun.$`git reset --hard ${upstream}`.cwd(cwd).quiet();
-    } else {
-      await Bun.$`git branch -f ${target} ${upstream}`.cwd(cwd).quiet();
+    const updateResult =
+      currentBranch === target
+        ? await Bun.$`git reset --hard ${upstream}`.cwd(cwd).quiet().nothrow()
+        : await Bun.$`git branch -f ${target} ${upstream}`.cwd(cwd).quiet().nothrow();
+    if (updateResult.exitCode !== 0) {
+      const detail = (updateResult.stdout.toString() + updateResult.stderr.toString())
+        .trim()
+        .replace(/^fatal:\s*/i, "");
+      throw new Error(`Cannot update branch ${q(target)}: ${detail}`);
     }
   });
   stderr(`Branch ${q(target)} updated.`);
